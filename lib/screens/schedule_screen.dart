@@ -7,7 +7,6 @@ import '../models/term_calendar.dart';
 import '../services/app_update.dart';
 import '../services/course_backup_service.dart';
 import '../services/lab_screenshot_parser.dart';
-import '../services/regular_schedule_file.dart';
 import '../services/regular_schedule_parser.dart';
 import '../services/school_schedule_import.dart';
 import '../services/screenshot_ocr.dart';
@@ -166,10 +165,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     final imported = await Navigator.of(context).push<RegularScheduleImport>(
       MaterialPageRoute(
         builder: (context) => RegularScheduleImportScreen(
-          pickFile: pickRegularScheduleFile,
-          readSchool: supportsSchoolScheduleImport
-              ? importSchoolSchedule
-              : null,
+          readSchool: importSchoolSchedule,
           saveCourses: save,
         ),
       ),
@@ -273,9 +269,10 @@ class _ScheduleScreenState extends State<ScheduleScreen>
                   onImport: widget.saveLabs == null
                       ? null
                       : () => _importScreenshot(widget.saveLabs!),
-                  onImportRegular: widget.saveRegular == null
-                      ? null
-                      : () => _importRegular(widget.saveRegular!),
+                  onImportRegular:
+                      supportsSchoolScheduleImport && widget.saveRegular != null
+                      ? () => _importRegular(widget.saveRegular!)
+                      : null,
                   onBackup: widget.backup == null
                       ? null
                       : () => _openBackup(widget.backup!),
@@ -468,7 +465,7 @@ class _ScheduleHeader extends StatelessWidget {
             IconButton.filledTonal(
               onPressed: onImportRegular,
               tooltip: '导入正课课表',
-              icon: const Icon(Icons.file_open_outlined),
+              icon: const Icon(Icons.school_outlined),
             ),
           ],
           if (onBackup != null || onUpdate != null)

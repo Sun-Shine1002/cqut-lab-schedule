@@ -8,13 +8,11 @@ import '../theme/schedule_theme.dart';
 class RegularScheduleImportScreen extends StatefulWidget {
   const RegularScheduleImportScreen({
     super.key,
-    required this.pickFile,
-    this.readSchool,
+    required this.readSchool,
     required this.saveCourses,
   });
 
-  final Future<String?> Function() pickFile;
-  final Future<String?> Function()? readSchool;
+  final Future<String?> Function() readSchool;
   final Future<void> Function(RegularScheduleImport) saveCourses;
 
   @override
@@ -25,36 +23,33 @@ class RegularScheduleImportScreen extends StatefulWidget {
 class _RegularScheduleImportScreenState
     extends State<RegularScheduleImportScreen> {
   RegularScheduleImport? _preview;
-  bool _picking = false;
+  bool _reading = false;
   bool _saving = false;
   String? _error;
 
-  Future<void> _pick(
-    Future<String?> Function() read,
-    String failureMessage,
-  ) async {
-    if (_picking || _saving) return;
+  Future<void> _readSchool() async {
+    if (_reading || _saving) return;
     setState(() {
-      _picking = true;
+      _reading = true;
       _error = null;
     });
     try {
-      final source = await read();
+      final source = await widget.readSchool();
       if (!mounted || source == null) return;
       final parsed = parseRegularScheduleImport(source);
       setState(() => _preview = parsed);
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _error = _message(error, failureMessage);
+        _error = _message(error, '暂时无法读取学校课表，请稍后重试。');
       });
     } finally {
-      if (mounted) setState(() => _picking = false);
+      if (mounted) setState(() => _reading = false);
     }
   }
 
   Future<void> _save(RegularScheduleImport schedule) async {
-    if (_picking || _saving) return;
+    if (_reading || _saving) return;
     setState(() {
       _saving = true;
       _error = null;
@@ -73,7 +68,7 @@ class _RegularScheduleImportScreenState
   @override
   Widget build(BuildContext context) {
     final preview = _preview;
-    final busy = _picking || _saving;
+    final busy = _reading || _saving;
     final theme = Theme.of(context);
     return PopScope<RegularScheduleImport>(
       canPop: !_saving,
@@ -85,49 +80,23 @@ class _RegularScheduleImportScreenState
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
               children: [
-                if (widget.readSchool case final read?) ...[
-                  FilledButton.icon(
-                    onPressed: busy
-                        ? null
-                        : () => _pick(read, '暂时无法读取学校课表，请稍后重试。'),
-                    icon: const Icon(Icons.school_outlined),
-                    label: const Text('从学校导入'),
+                FilledButton.icon(
+                  onPressed: busy ? null : _readSchool,
+                  icon: const Icon(Icons.school_outlined),
+                  label: Text(_reading ? '正在读取' : '从学校导入'),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(4, 8, 4, 12),
+                  child: Text(
+                    '在学校页面登录并打开个人课表，然后点「读取课表」。',
+                    style: TextStyle(color: scheduleMuted, height: 1.5),
                   ),
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(4, 8, 4, 20),
-                    child: Text(
-                      '在学校页面登录并打开个人课表，然后点「读取课表」。',
-                      style: TextStyle(color: scheduleMuted, height: 1.5),
-                    ),
-                  ),
-                ],
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surface,
-                    border: Border.all(color: scheduleLine),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(18),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('拾光课程表文件', style: theme.textTheme.titleMedium),
-                        const SizedBox(height: 8),
-                        const Text(
-                          '在拾光课程表的「我的 → 高级功能 → 课表导入/导出」导出 JSON，然后选择该文件。',
-                          style: TextStyle(color: scheduleMuted, height: 1.5),
-                        ),
-                        const SizedBox(height: 16),
-                        OutlinedButton.icon(
-                          onPressed: busy
-                              ? null
-                              : () => _pick(widget.pickFile, '无法打开课表文件，请重新选择。'),
-                          icon: const Icon(Icons.file_open_outlined),
-                          label: Text(_picking ? '正在读取' : '选择 JSON 文件'),
-                        ),
-                      ],
-                    ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 4),
+                  child: Text(
+                    '课程导入功能参考 GitHub 开源项目“拾光课程表”。',
+                    style: TextStyle(color: scheduleMuted, height: 1.5),
                   ),
                 ),
                 if (preview != null) ...[

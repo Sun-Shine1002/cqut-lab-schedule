@@ -6,11 +6,15 @@ import '../models/course.dart';
 import '../theme/schedule_theme.dart';
 
 const _railWidth = 37.0;
-const _periodHeight = 47.0;
+const _periodHeight = 53.0;
 const _minutesOutsideScale = .55;
 const _minimumBlockHeight = 18.0;
 const _todayFill = Color(0xFFF3EDF7);
 const _dayLabels = ['一', '二', '三', '四', '五', '六', '日'];
+final _campusPrefix = RegExp(r'^(?:两江|花溪|杨家坪)校区[\s，、,·-]*(?=\S)');
+final _buildingAndRoom = RegExp(
+  r'^(.*?(?:楼|馆|操场|实验室|教室))[\s·]*([A-Za-z]*\s*[0-9０-９][A-Za-z0-9０-９-]*(?:号|室)?)$',
+);
 
 // The reference timetable shows periods 1–10. Experimental times are mapped
 // onto the clock even when they begin or end outside those periods.
@@ -301,8 +305,8 @@ class _DayColumn extends StatelessWidget {
             Positioned(
               top: block.top + 1,
               height: block.bottom - block.top - 2,
-              left: 1.5,
-              right: 1.5,
+              left: 1,
+              right: 1,
               child: _CourseTile(
                 key: block.courses.length == 1
                     ? ValueKey(block.courses.single)
@@ -333,9 +337,28 @@ class _CourseTile extends StatelessWidget {
     final hasOverlap = courses.length > 1;
     final mixedKinds =
         hasOverlap && courses.any((other) => other.kind != course.kind);
-    final label = courses.length == 1
-        ? '${isLab ? '实验课' : '正课'}，${course.name}，${course.startTime}至${course.endTime}'
-        : '查看重叠课程，共 ${courses.length} 门';
+    final location = course.location.trim();
+    final tileLocation = location.replaceFirst(_campusPrefix, '');
+    final classroom = _buildingAndRoom.firstMatch(tileLocation);
+    final label = [
+      if (hasOverlap) '查看重叠课程，共 ${courses.length} 门',
+      isLab ? '实验课' : '正课',
+      course.name,
+      '${course.startTime}至${course.endTime}',
+      if (location.isNotEmpty) location,
+    ].join('，');
+    final titleStyle = TextStyle(
+      color: ink,
+      fontSize: 11.5,
+      height: 1.2,
+      fontWeight: FontWeight.w700,
+    );
+    final roomStyle = TextStyle(
+      color: ink,
+      fontSize: 11,
+      height: 1.15,
+      fontWeight: FontWeight.w600,
+    );
     return Semantics(
       button: true,
       label: label,
@@ -363,77 +386,93 @@ class _CourseTile extends StatelessWidget {
                     color: isLab ? timetableRegularInk : timetableLabInk,
                   ),
                 ),
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final textScale = MediaQuery.textScalerOf(context);
-                  final lineHeight = textScale.scale(11) * 1.25;
-                  final roomHeight = textScale.scale(9) * 2.4 + 2;
-                  final showRoom =
-                      !hasOverlap &&
-                      course.location.isNotEmpty &&
-                      constraints.maxHeight >= 6 + lineHeight * 4 + roomHeight;
-                  final extraHeight = hasOverlap
-                      ? lineHeight
-                      : (showRoom ? roomHeight : 0);
-                  final lines = math.max(
-                    1,
-                    ((constraints.maxHeight - 6 - extraHeight) / lineHeight)
-                        .floor(),
-                  );
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 3,
-                      vertical: 3,
-                    ),
-                    child: Column(
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final scaler = MediaQuery.textScalerOf(context);
+                    final titleLine = scaler.scale(11.5) * 1.2;
+                    final roomLine = scaler.scale(11) * 1.15;
+                    final height = constraints.maxHeight;
+                    final showLocation = tileLocation.isNotEmpty;
+                    final showTitle =
+                        !showLocation || height >= titleLine + roomLine + 2;
+                    final showCount =
+                        hasOverlap &&
+                        height >=
+                            titleLine * 2 + (showLocation ? roomLine + 2 : 0);
+                    final roomLines =
+                        height >=
+                            titleLine * (showCount ? 2 : 1) + roomLine * 2 + 2
+                        ? 2
+                        : 1;
+                    final titleLines = math.max(
+                      1,
+                      ((height -
+                                  (showLocation
+                                      ? roomLine * roomLines + 2
+                                      : 0) -
+                                  (showCount ? titleLine : 0)) /
+                              titleLine)
+                          .floor(),
+                    );
+                    return Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        if (hasOverlap)
+                        if (showCount)
+                          SizedBox(
+                            height: titleLine,
+                            child: _TileLine(
+                              '+${courses.length - 1}',
+                              style: titleStyle,
+                            ),
+                          ),
+                        if (showTitle)
                           Flexible(
                             child: Text(
-                              '+${courses.length - 1}',
-                              maxLines: 1,
-                              overflow: TextOverflow.clip,
-                              style: TextStyle(
-                                color: ink,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
+                              course.name,
+                              maxLines: titleLines,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
+                              style: titleStyle,
+                            ),
+                          ),
+                        if (showLocation) ...[
+                          if (showTitle) const SizedBox(height: 2),
+                          if (classroom != null) ...[
+                            if (roomLines == 2)
+                              SizedBox(
+                                height: roomLine,
+                                child: _TileLine(
+                                  classroom[1]!,
+                                  style: roomStyle,
+                                ),
+                              ),
+                            SizedBox(
+                              height: math.min(height, roomLine),
+                              child: _TileLine(
+                                classroom[2]!.trim(),
+                                style: roomStyle,
                               ),
                             ),
-                          ),
-                        Flexible(
-                          flex: 3,
-                          child: Text(
-                            course.name,
-                            maxLines: lines,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: ink,
-                              fontSize: 11,
-                              height: 1.25,
-                              fontWeight: FontWeight.w700,
+                          ] else
+                            SizedBox(
+                              height: math.min(height, roomLine * roomLines),
+                              child: Center(
+                                child: Text(
+                                  tileLocation,
+                                  maxLines: roomLines,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                  style: roomStyle,
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
-                        if (showRoom) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            course.location,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: ink,
-                              fontSize: 9,
-                              height: 1.2,
-                            ),
-                          ),
                         ],
                       ],
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
             ],
           ),
@@ -441,6 +480,19 @@ class _CourseTile extends StatelessWidget {
       ),
     );
   }
+}
+
+class _TileLine extends StatelessWidget {
+  const _TileLine(this.text, {required this.style});
+
+  final String text;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) => FittedBox(
+    fit: BoxFit.scaleDown,
+    child: Text(text, style: style, maxLines: 1, softWrap: false),
+  );
 }
 
 class _PeriodLabel extends StatelessWidget {

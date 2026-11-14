@@ -26,7 +26,6 @@ void main() {
                     Navigator.of(context).push<RegularScheduleImport>(
                       MaterialPageRoute(
                         builder: (_) => RegularScheduleImportScreen(
-                          pickFile: () async => null,
                           readSchool: () async => _schedule,
                           saveCourses: (courses) async {
                             if (++attempts == 1)
@@ -44,6 +43,8 @@ void main() {
       );
       await tester.tap(find.text('打开导入页'));
       await tester.pumpAndSettle();
+      expect(find.text('课程导入功能参考 GitHub 开源项目“拾光课程表”。'), findsOneWidget);
+      expect(find.text('选择 JSON 文件'), findsNothing);
       await tester.tap(find.text('从学校导入'));
       await tester.pumpAndSettle();
       expect(find.text('读取到 2 个上课安排'), findsOneWidget);

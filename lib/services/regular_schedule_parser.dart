@@ -21,13 +21,13 @@ RegularScheduleImport parseRegularScheduleImport(String source) {
       source.startsWith('\ufeff') ? source.substring(1) : source,
     );
   } on FormatException {
-    throw const FormatException('无法读取 JSON，请选择拾光课程表导出的课程文件。');
+    throw const FormatException('无法读取学校课表数据，请重新导入。');
   }
   if (decoded is! Map<String, dynamic> || decoded['courses'] is! List) {
-    throw const FormatException('文件缺少课程列表，请选择拾光课程表导出的课程文件。');
+    throw const FormatException('课表数据缺少课程列表，请重新导入。');
   }
   final entries = decoded['courses'] as List;
-  if (entries.isEmpty) throw const FormatException('文件中没有正课可导入。');
+  if (entries.isEmpty) throw const FormatException('课表中没有正课可导入。');
 
   final slots = _parseTimeSlots(decoded['timeSlots']);
   final result = <Course>[];
@@ -77,11 +77,11 @@ RegularScheduleImport parseRegularScheduleImport(String source) {
 
 Map<int, (String, String)> _parseTimeSlots(Object? value) {
   if (value == null) return {};
-  if (value is! List) throw const FormatException('文件中的节次时间表格式不正确。');
+  if (value is! List) throw const FormatException('课表中的节次时间表格式不正确。');
   final slots = <int, (String, String)>{};
   for (final entry in value) {
     if (entry is! Map<String, dynamic>) {
-      throw const FormatException('文件中的节次时间表格式不正确。');
+      throw const FormatException('课表中的节次时间表格式不正确。');
     }
     final number = entry['number'];
     final start = _readClock(entry['startTime']);
@@ -92,7 +92,7 @@ Map<int, (String, String)> _parseTimeSlots(Object? value) {
         start == null ||
         end == null ||
         start.compareTo(end) >= 0) {
-      throw const FormatException('文件中的节次编号或时间不正确。');
+      throw const FormatException('课表中的节次编号或时间不正确。');
     }
     slots[number] = (start, end);
   }
@@ -118,7 +118,7 @@ Map<int, (String, String)> _parseTimeSlots(Object? value) {
     start = slots[first]?.$1;
     end = slots[last]?.$2;
     if (start == null || end == null) {
-      throw FormatException('「$name」的节次在文件中缺少对应时间。');
+      throw FormatException('课表中缺少「$name」对应节次的时间。');
     }
   }
   if (start == null || end == null || start.compareTo(end) >= 0) {

@@ -5,6 +5,8 @@ import 'package:material_ui/material_ui.dart';
 
 import '../services/app_update.dart';
 
+const _scanInstructions = '如果系统弹出 Google Play 保护机制提示，请点「扫描应用」，等扫描完成后按系统提示继续安装。';
+
 class AppUpdateScreen extends StatefulWidget {
   const AppUpdateScreen({super.key, this.available});
 
@@ -166,11 +168,17 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                     child: Text(message),
                   ),
                 const SizedBox(height: 16),
-                if (release != null)
+                if (release != null) ...[
                   FilledButton(
                     onPressed: busy ? null : _update,
                     child: Text(_readyPath == null ? '下载并安装' : '安装更新'),
                   ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _scanInstructions,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
                 if (_needsPermission)
                   OutlinedButton(
                     onPressed: _openSettings,
