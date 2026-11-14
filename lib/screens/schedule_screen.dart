@@ -31,6 +31,7 @@ class ScheduleScreen extends StatefulWidget {
     this.isDemo = false,
     this.termCalendar,
     this.now,
+    this.checkForUpdate,
   });
 
   final List<Course> courses;
@@ -43,6 +44,7 @@ class ScheduleScreen extends StatefulWidget {
   final bool isDemo;
   final TermCalendar? termCalendar;
   final DateTime Function()? now;
+  final Future<AppRelease?> Function()? checkForUpdate;
 
   @override
   State<ScheduleScreen> createState() => _ScheduleScreenState();
@@ -57,6 +59,14 @@ class _ScheduleScreenState extends State<ScheduleScreen>
   late List<Course> _importedRegular;
   CourseKind? _kind;
   AppRelease? _availableUpdate;
+  bool _startupCheckStarted = false;
+  bool _offerUpdate = false;
+  bool _updateScreenOpen = false;
+  double _weekSwipeDistance = 0;
+
+  bool get _canCheckForUpdate =>
+      widget.checkForUpdate != null ||
+      (AppUpdate.supported && AppUpdate.configured);
 
   Iterable<Course> get _courses => [
     ...(_importedRegular.isEmpty ? widget.courses : _importedRegular),
@@ -83,21 +93,60 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     _importedRegular = widget.importedRegular;
     _calendar = widget.termCalendar ?? TermCalendar.cqutFall2026;
     _today = (widget.now ?? DateTime.now)();
-    if (AppUpdate.supported && AppUpdate.configured) {
-      unawaited(_checkForUpdate());
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_checkForUpdate());
+    });
   }
 
   Future<void> _checkForUpdate() async {
+    if (!_canCheckForUpdate || _startupCheckStarted) return;
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
+    _startupCheckStarted = true;
     try {
-      final installed = await AppUpdate.info();
-      final update = await AppUpdate.check(installed);
+      final check = widget.checkForUpdate;
+      final update = check == null
+          ? await AppUpdate.check(await AppUpdate.info())
+          : await check();
       if (mounted && update != null) {
-        setState(() => _availableUpdate = update);
+        setState(() {
+          _availableUpdate = update;
+          _offerUpdate = !_updateScreenOpen;
+        });
       }
     } on Exception {
-      // The manual check explains network errors without interrupting the timetable.
+      // The manual check reports connection errors.
     }
+  }
+
+  Future<void> _promptForUpdate(AppRelease release) async {
+    if (!mounted ||
+        !_offerUpdate ||
+        release != _availableUpdate ||
+        ModalRoute.of(context)?.isCurrent != true) {
+      return;
+    }
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
+    _offerUpdate = false;
+    final ready = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('发现新版本'),
+        content: Text('课程表 ${release.versionName} 已发布。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('稍后'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('查看更新'),
+          ),
+        ],
+      ),
+    );
+    if (mounted && ready == true) await _openUpdate();
   }
 
   Future<void> _openBackup(CourseBackupService backup) async {
@@ -115,11 +164,17 @@ class _ScheduleScreenState extends State<ScheduleScreen>
   }
 
   Future<void> _openUpdate() async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => AppUpdateScreen(available: _availableUpdate),
-      ),
-    );
+    _offerUpdate = false;
+    _updateScreenOpen = true;
+    try {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => AppUpdateScreen(available: _availableUpdate),
+        ),
+      );
+    } finally {
+      _updateScreenOpen = false;
+    }
   }
 
   @override
@@ -134,6 +189,11 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     final today = (widget.now ?? DateTime.now)();
     if (!DateUtils.isSameDay(_today, today)) {
       setState(() => _today = today);
+    }
+    if (!_startupCheckStarted) unawaited(_checkForUpdate());
+    final update = _availableUpdate;
+    if (_offerUpdate && update != null) {
+      unawaited(_promptForUpdate(update));
     }
   }
 
@@ -157,6 +217,68 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     setState(() {
       _selectedWeek = week == _calendar.weekOf(_today) ? null : week;
     });
+  }
+
+  void _finishWeekSwipe(DragEndDetails _) {
+    if (_weekSwipeDistance.abs() < 48) return;
+    final target = _week + (_weekSwipeDistance < 0 ? 1 : -1);
+    if (target >= 1 && target <= _lastWeek) _showWeek(target);
+  }
+
+  Widget _buildTimetable({
+    required int week,
+    required int currentWeek,
+    required List<Course> courses,
+  }) {
+    return GestureDetector(
+      key: const ValueKey('timetable-week-swipe'),
+      behavior: HitTestBehavior.opaque,
+      excludeFromSemantics: true,
+      onHorizontalDragStart: (_) => _weekSwipeDistance = 0,
+      onHorizontalDragUpdate: (details) =>
+          _weekSwipeDistance += details.primaryDelta ?? 0,
+      onHorizontalDragEnd: _finishWeekSwipe,
+      child: Column(
+        children: [
+          TimetableWeekdayHeader(
+            weekStart: _calendar.mondayForWeek(week),
+            today: _today,
+          ),
+          Expanded(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                ListView(
+                  key: PageStorageKey(('timetable-scroll', week)),
+                  padding: const EdgeInsets.only(bottom: 8),
+                  children: [
+                    TimetableGrid(
+                      courses: courses,
+                      todayWeekday: week == currentWeek ? _today.weekday : null,
+                      onCourseTap: (course) =>
+                          showCourseDetails(context, course),
+                    ),
+                  ],
+                ),
+                if (courses.isEmpty)
+                  IgnorePointer(
+                    child: Align(
+                      alignment: const Alignment(0, -.30),
+                      child: Chip(
+                        label: Text(switch (_kind) {
+                          null => '本周没有课程',
+                          CourseKind.regular => '本周没有正课',
+                          CourseKind.lab => '本周没有实验课',
+                        }, style: const TextStyle(color: scheduleMuted)),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _importRegular(
@@ -248,6 +370,13 @@ class _ScheduleScreenState extends State<ScheduleScreen>
 
   @override
   Widget build(BuildContext context) {
+    final routeIsCurrent = ModalRoute.isCurrentOf(context) == true;
+    final update = _availableUpdate;
+    if (routeIsCurrent && update != null && _offerUpdate) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_promptForUpdate(update));
+      });
+    }
     final week = _week;
     final currentWeek = _calendar.weekOf(_today);
     final courses = _courses
@@ -345,42 +474,11 @@ class _ScheduleScreenState extends State<ScheduleScreen>
                   ),
                 ),
                 const Divider(height: 1, color: scheduleLine),
-                TimetableWeekdayHeader(
-                  weekStart: _calendar.mondayForWeek(week),
-                  today: _today,
-                ),
                 Expanded(
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      ListView(
-                        key: PageStorageKey(('timetable-scroll', week)),
-                        padding: const EdgeInsets.only(bottom: 8),
-                        children: [
-                          TimetableGrid(
-                            courses: courses,
-                            todayWeekday: week == currentWeek
-                                ? _today.weekday
-                                : null,
-                            onCourseTap: (course) =>
-                                showCourseDetails(context, course),
-                          ),
-                        ],
-                      ),
-                      if (courses.isEmpty)
-                        IgnorePointer(
-                          child: Align(
-                            alignment: const Alignment(0, -.30),
-                            child: Chip(
-                              label: Text(switch (_kind) {
-                                null => '本周没有课程',
-                                CourseKind.regular => '本周没有正课',
-                                CourseKind.lab => '本周没有实验课',
-                              }, style: const TextStyle(color: scheduleMuted)),
-                            ),
-                          ),
-                        ),
-                    ],
+                  child: _buildTimetable(
+                    week: week,
+                    currentWeek: currentWeek,
+                    courses: courses,
                   ),
                 ),
               ],

@@ -1,3 +1,5 @@
+import 'package:cqut_lab_schedule/models/course.dart';
+import 'package:cqut_lab_schedule/models/term_calendar.dart';
 import 'package:cqut_lab_schedule/screens/schedule_screen.dart';
 import 'package:cqut_lab_schedule/services/demo_regular_courses.dart';
 import 'package:cqut_lab_schedule/services/schedule_parser.dart';
@@ -35,6 +37,79 @@ void main() {
       await tester.tap(find.byTooltip('下一周'));
       await tester.pumpAndSettle();
       expect(find.bySemanticsLabel('今天，星期六，11月14日'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'swipes across weeks within term bounds and still scrolls vertically',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(360, 620);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ScheduleScreen(
+            courses: const [
+              Course(
+                name: '课表手势测试',
+                week: 2,
+                weekday: DateTime.monday,
+                startTime: '08:30',
+                endTime: '10:10',
+                location: '弘远楼 B0119',
+                teacher: '',
+                kind: CourseKind.regular,
+              ),
+            ],
+            termCalendar: TermCalendar(DateTime(2026, 9, 7), totalWeeks: 3),
+            now: () => DateTime(2026, 9, 14),
+          ),
+        ),
+      );
+
+      const currentDate = '今天，星期一，9月14日';
+      final grid = find.byType(ListView);
+      expect(find.text('第 2 周'), findsOneWidget);
+      expect(find.bySemanticsLabel(currentDate), findsOneWidget);
+
+      final position = tester
+          .state<ScrollableState>(
+            find.descendant(of: grid, matching: find.byType(Scrollable)),
+          )
+          .position;
+      await tester.drag(grid, const Offset(0, -160));
+      await tester.pumpAndSettle();
+      expect(position.pixels, greaterThan(0));
+      expect(find.text('第 2 周'), findsOneWidget);
+      position.jumpTo(0);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('课表手势测试'));
+      await tester.pumpAndSettle();
+      expect(find.text('上课地点'), findsOneWidget);
+      expect(find.text('弘远楼 B0119'), findsOneWidget);
+      await tester.tap(find.byTooltip('关闭详情'));
+      await tester.pumpAndSettle();
+
+      for (final (dx, expectedWeek) in [
+        (-140.0, 3),
+        (-140.0, 3),
+        (140.0, 2),
+        (140.0, 1),
+        (140.0, 1),
+        (-140.0, 2),
+      ]) {
+        await tester.drag(grid, Offset(dx, 0));
+        await tester.pumpAndSettle();
+        expect(find.text('第 $expectedWeek 周'), findsOneWidget);
+        expect(
+          find.bySemanticsLabel(currentDate),
+          expectedWeek == 2 ? findsOneWidget : findsNothing,
+        );
+      }
+      expect(find.text('课表手势测试'), findsOneWidget);
     },
   );
 
