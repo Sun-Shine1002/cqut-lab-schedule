@@ -41,7 +41,7 @@ void main() {
   );
 
   testWidgets(
-    'swipes across weeks within term bounds and still scrolls vertically',
+    'drags whole weeks into view, snaps into place, and still scrolls vertically',
     (tester) async {
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = const Size(360, 620);
@@ -70,7 +70,8 @@ void main() {
       );
 
       const currentDate = '今天，星期一，9月14日';
-      final grid = find.byType(ListView);
+      final pages = find.byKey(const ValueKey('timetable-week-swipe'));
+      final grid = find.byKey(const PageStorageKey(('timetable-scroll', 2)));
       expect(find.text('第 2 周'), findsOneWidget);
       expect(find.bySemanticsLabel(currentDate), findsOneWidget);
 
@@ -93,15 +94,38 @@ void main() {
       await tester.tap(find.byTooltip('关闭详情'));
       await tester.pumpAndSettle();
 
+      final restingLeft = tester.getTopLeft(grid).dx;
+      final viewport = tester.getRect(pages);
+      final nextGrid = find.byKey(
+        const PageStorageKey(('timetable-scroll', 3)),
+      );
+      final touch = await tester.startGesture(viewport.center);
+      await touch.moveBy(
+        const Offset(-26, 0),
+        timeStamp: const Duration(milliseconds: 100),
+      );
+      await touch.moveBy(
+        const Offset(-100, 0),
+        timeStamp: const Duration(milliseconds: 250),
+      );
+      await tester.pump();
+      expect(tester.getTopLeft(grid).dx, lessThan(restingLeft - 50));
+      expect(tester.getTopLeft(nextGrid).dx, lessThan(viewport.right - 50));
+      expect(find.text('09/21'), findsOneWidget);
+      await touch.up(timeStamp: const Duration(milliseconds: 500));
+      await tester.pumpAndSettle();
+      expect(find.text('第 2 周'), findsOneWidget);
+      expect(tester.getTopLeft(grid).dx, closeTo(restingLeft, .5));
+
       for (final (dx, expectedWeek) in [
-        (-140.0, 3),
-        (-140.0, 3),
-        (140.0, 2),
-        (140.0, 1),
-        (140.0, 1),
-        (-140.0, 2),
+        (-230.0, 3),
+        (-230.0, 3),
+        (230.0, 2),
+        (230.0, 1),
+        (230.0, 1),
+        (-230.0, 2),
       ]) {
-        await tester.drag(grid, Offset(dx, 0));
+        await tester.drag(pages, Offset(dx, 0));
         await tester.pumpAndSettle();
         expect(find.text('第 $expectedWeek 周'), findsOneWidget);
         expect(

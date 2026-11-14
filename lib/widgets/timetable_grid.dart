@@ -56,6 +56,7 @@ class TimetableWeekdayHeader extends StatelessWidget {
             SizedBox(
               width: _railWidth,
               child: Semantics(
+                container: true,
                 label: '${weekStart.month}月',
                 excludeSemantics: true,
                 child: _CalendarHeading(
@@ -83,6 +84,7 @@ class TimetableWeekdayHeader extends StatelessWidget {
     final month = date.month.toString().padLeft(2, '0');
     final dayOfMonth = date.day.toString().padLeft(2, '0');
     return Semantics(
+      container: true,
       label:
           '${isToday ? '今天，' : ''}${weekdays[dayIndex]}，${date.month}月${date.day}日',
       excludeSemantics: true,

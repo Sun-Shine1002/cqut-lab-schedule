@@ -53,6 +53,7 @@ class ScheduleScreen extends StatefulWidget {
 class _ScheduleScreenState extends State<ScheduleScreen>
     with WidgetsBindingObserver {
   int? _selectedWeek;
+  late final PageController _weekPages;
   late TermCalendar _calendar;
   late DateTime _today;
   late List<Course> _importedLabs;
@@ -62,7 +63,6 @@ class _ScheduleScreenState extends State<ScheduleScreen>
   bool _startupCheckStarted = false;
   bool _offerUpdate = false;
   bool _updateScreenOpen = false;
-  double _weekSwipeDistance = 0;
 
   bool get _canCheckForUpdate =>
       widget.checkForUpdate != null ||
@@ -93,6 +93,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     _importedRegular = widget.importedRegular;
     _calendar = widget.termCalendar ?? TermCalendar.cqutFall2026;
     _today = (widget.now ?? DateTime.now)();
+    _weekPages = PageController(initialPage: _week - 1, keepPage: false);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_checkForUpdate());
     });
@@ -161,6 +162,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
       _selectedWeek = null;
       _kind = null;
     });
+    _syncWeekPage();
   }
 
   Future<void> _openUpdate() async {
@@ -180,6 +182,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _weekPages.dispose();
     super.dispose();
   }
 
@@ -189,6 +192,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     final today = (widget.now ?? DateTime.now)();
     if (!DateUtils.isSameDay(_today, today)) {
       setState(() => _today = today);
+      _syncWeekPage();
     }
     if (!_startupCheckStarted) unawaited(_checkForUpdate());
     final update = _availableUpdate;
@@ -200,6 +204,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
   @override
   void didUpdateWidget(ScheduleScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final previousWeek = _week;
     if (widget.importedLabs != oldWidget.importedLabs) {
       _importedLabs = widget.importedLabs;
     }
@@ -211,18 +216,38 @@ class _ScheduleScreenState extends State<ScheduleScreen>
       _selectedWeek = null;
     }
     if (_week > _lastWeek) _selectedWeek = _lastWeek;
+    if (_week != previousWeek) _syncWeekPage();
   }
 
   void _showWeek(int week) {
-    setState(() {
-      _selectedWeek = week == _calendar.weekOf(_today) ? null : week;
+    if (week == _week || !_weekPages.hasClients) return;
+    if ((week - _week).abs() == 1) {
+      unawaited(
+        _weekPages.animateToPage(
+          week - 1,
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOutCubic,
+        ),
+      );
+    } else {
+      _weekPages.jumpToPage(week - 1);
+    }
+  }
+
+  void _syncWeekPage() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _weekPages.hasClients) {
+        _weekPages.jumpToPage(_week - 1);
+      }
     });
   }
 
-  void _finishWeekSwipe(DragEndDetails _) {
-    if (_weekSwipeDistance.abs() < 48) return;
-    final target = _week + (_weekSwipeDistance < 0 ? 1 : -1);
-    if (target >= 1 && target <= _lastWeek) _showWeek(target);
+  void _onWeekPageChanged(int page) {
+    final week = page + 1;
+    if (week == _week) return;
+    setState(() {
+      _selectedWeek = week == _calendar.weekOf(_today) ? null : week;
+    });
   }
 
   Widget _buildTimetable({
@@ -230,14 +255,8 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     required int currentWeek,
     required List<Course> courses,
   }) {
-    return GestureDetector(
-      key: const ValueKey('timetable-week-swipe'),
-      behavior: HitTestBehavior.opaque,
-      excludeFromSemantics: true,
-      onHorizontalDragStart: (_) => _weekSwipeDistance = 0,
-      onHorizontalDragUpdate: (details) =>
-          _weekSwipeDistance += details.primaryDelta ?? 0,
-      onHorizontalDragEnd: _finishWeekSwipe,
+    return ColoredBox(
+      color: scheduleBackground,
       child: Column(
         children: [
           TimetableWeekdayHeader(
@@ -250,6 +269,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
               children: [
                 ListView(
                   key: PageStorageKey(('timetable-scroll', week)),
+                  primary: false,
                   padding: const EdgeInsets.only(bottom: 8),
                   children: [
                     TimetableGrid(
@@ -299,6 +319,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
       _selectedWeek = null;
       _kind = null;
     });
+    _syncWeekPage();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('已导入 ${imported.courses.length} 条正课安排')),
     );
@@ -331,6 +352,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
       _selectedWeek = week == _calendar.weekOf(_today) ? null : week;
       _kind = CourseKind.lab;
     });
+    _syncWeekPage();
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text('已保存 ${imported.length} 条实验课记录')));
   }
@@ -379,9 +401,12 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     }
     final week = _week;
     final currentWeek = _calendar.weekOf(_today);
-    final courses = _courses
-        .where((c) => c.week == week && (_kind == null || c.kind == _kind))
-        .toList();
+    final coursesByWeek = <int, List<Course>>{};
+    for (final course in _courses) {
+      if (_kind == null || course.kind == _kind) {
+        (coursesByWeek[course.week] ??= []).add(course);
+      }
+    }
 
     return Scaffold(
       body: SafeArea(
@@ -475,10 +500,20 @@ class _ScheduleScreenState extends State<ScheduleScreen>
                 ),
                 const Divider(height: 1, color: scheduleLine),
                 Expanded(
-                  child: _buildTimetable(
-                    week: week,
-                    currentWeek: currentWeek,
-                    courses: courses,
+                  child: PageView.builder(
+                    key: const ValueKey('timetable-week-swipe'),
+                    controller: _weekPages,
+                    physics: const ClampingScrollPhysics(),
+                    itemCount: _lastWeek,
+                    onPageChanged: _onWeekPageChanged,
+                    itemBuilder: (context, index) {
+                      final pageWeek = index + 1;
+                      return _buildTimetable(
+                        week: pageWeek,
+                        currentWeek: currentWeek,
+                        courses: coursesByWeek[pageWeek] ?? const [],
+                      );
+                    },
                   ),
                 ),
               ],
