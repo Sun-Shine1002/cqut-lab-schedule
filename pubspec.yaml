@@ -1,0 +1,27 @@
+name: cqut_lab_schedule
+description: 重庆理工大学正课与实验课表
+publish_to: none
+version: 0.2.0+2
+
+environment:
+  sdk: ^3.13.0
+  flutter: '>=3.50.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  crypto: ^3.0.8
+  file_selector: ^1.1.0
+  html: ^0.15.6
+  material_ui: ^1.11.0
+  shared_preferences: ^2.5.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/cqut_regular_import.js
+    - assets/demo_schedule.html
