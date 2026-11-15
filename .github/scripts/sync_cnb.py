@@ -41,7 +41,7 @@ PUBLIC = build_opener(AssetRedirects())
 class CnbRelease:
     def __init__(self, repository, token):
         self.root = f"{API}/{repository}/-/releases"
-        self.web = f"{WEB}/{repository}/-/releases/download"
+        self.web = f"{WEB}/{repository}/-/releases"
         self.headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.cnb.api+json",
@@ -100,7 +100,9 @@ class CnbRelease:
         self.api(verify._replace(query=urlencode(query)).geturl(), "POST", read_body=False)
 
     def public_asset(self, tag, name):
-        request = Request(f"{self.web}/{tag}/{name}", headers={"Cache-Control": "no-cache"})
+        # CNB's /download/latest alias can resolve to a literal tag on the CDN.
+        download = "latest/download" if tag == "latest" else f"download/{tag}"
+        request = Request(f"{self.web}/{download}/{name}", headers={"Cache-Control": "no-cache"})
         return PUBLIC.open(request, timeout=45)
 
     def read_manifest(self, tag, *, optional=False):
@@ -128,7 +130,7 @@ class CnbRelease:
 
 
 def sync(cnb, github, tag, apk, official):
-    mirror = dict(official, mirrorApkUrl=f"{cnb.web}/{tag}/{APK}")
+    mirror = dict(official, mirrorApkUrl=f"{cnb.web}/download/{tag}/{APK}")
     payload = (json.dumps(mirror, ensure_ascii=False) + "\n").encode()
     if len(payload) > 65536:
         raise ValueError("CNB metadata exceeds the app limit.")

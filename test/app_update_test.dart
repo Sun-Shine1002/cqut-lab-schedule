@@ -127,7 +127,7 @@ void main() {
 
   test('accepts only canonical download URLs from the configured CNB repo', () {
     final feed = Uri.parse(
-      'https://cnb.cool/group/team/repo/-/releases/download/latest/update.json',
+      'https://cnb.cool/group/team/repo/-/releases/latest/download/update.json',
     );
     final apk =
         'https://cnb.cool/group/team/repo/-/releases/download/v0.2.1/cqut.apk';
@@ -156,7 +156,7 @@ void main() {
 
   test('restricts mirror redirects to same origin or the CNB asset CDN', () {
     final cnb = Uri.parse(
-      'https://cnb.cool/group/repo/-/releases/download/latest/update.json',
+      'https://cnb.cool/group/repo/-/releases/latest/download/update.json',
     );
     final asset = Uri.parse('https://asset.cnb.cool/attachment?signature=test');
     expect(allowMirrorRedirect(cnb, cnb, asset), isTrue);

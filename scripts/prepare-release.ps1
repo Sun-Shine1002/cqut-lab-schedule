@@ -39,7 +39,7 @@ if ($CnbRepository) {
         $CnbRepository.EndsWith('.git', [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Provide a CNB repository path (group/project) and omit -MirrorBaseUrl.'
     }
-    $mirrorUpdateUrl = "https://cnb.cool/$CnbRepository/-/releases/download/latest/update.json"
+    $mirrorUpdateUrl = "https://cnb.cool/$CnbRepository/-/releases/latest/download/update.json"
 } elseif ($MirrorBaseUrl) {
     $base = $MirrorBaseUrl.TrimEnd('/')
     $uri = [uri] $base

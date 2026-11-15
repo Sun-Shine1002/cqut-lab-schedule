@@ -8,11 +8,14 @@ String? _cnbReleaseRepository(Uri uri) {
   if (separator < 2 ||
       segments.length != separator + 5 ||
       segments[separator + 1] != 'releases' ||
-      segments[separator + 2] != 'download' ||
-      segments[separator + 3].isEmpty ||
       segments[separator + 4].isEmpty) {
     return null;
   }
+  final section = segments[separator + 2];
+  final tagOrAction = segments[separator + 3];
+  final versionDownload = section == 'download' && tagOrAction.isNotEmpty;
+  final latestDownload = section == 'latest' && tagOrAction == 'download';
+  if (!versionDownload && !latestDownload) return null;
   return segments.take(separator).join('/');
 }
 
