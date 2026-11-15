@@ -8,6 +8,56 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
 void main() {
+  testWidgets('chooses both lab import methods and saves the direct preview', (
+    tester,
+  ) async {
+    const lab = Course(
+      name: '液体黏度测量',
+      week: 2,
+      weekday: DateTime.monday,
+      startTime: '08:30',
+      endTime: '10:10',
+      location: '实验楼 201',
+      teacher: '',
+    );
+    List<Course>? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ScheduleScreen(
+          courses: const [],
+          termCalendar: TermCalendar(DateTime(2026, 9, 7), totalWeeks: 3),
+          now: () => DateTime(2026, 9, 7),
+          readSchoolLabs: () async => const [lab],
+          saveLabs: (courses) async => saved = courses,
+        ),
+      ),
+    );
+
+    final importButton = find.byTooltip('导入实验课');
+    await tester.tap(importButton);
+    await tester.pumpAndSettle();
+    expect(find.text('请先连接校园网，再登录实验选课系统。'), findsOneWidget);
+
+    await tester.tap(find.text('截图导入'));
+    await tester.pumpAndSettle();
+    expect(find.text('截图导入实验课'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    await tester.tap(importButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('直接导入'));
+    await tester.pumpAndSettle();
+    expect(find.text('液体黏度测量'), findsOneWidget);
+    expect(saved, isNull);
+
+    await tester.tap(find.text('确认导入'));
+    await tester.pumpAndSettle();
+    expect(saved, [lab]);
+    expect(find.text('第 2 周'), findsOneWidget);
+    expect(find.text('液体黏度测量'), findsOneWidget);
+  });
+
   testWidgets(
     'opens the current week and highlights today even without a class',
     (tester) async {

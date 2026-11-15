@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../models/course.dart';
@@ -26,6 +27,7 @@ class ScheduleScreen extends StatefulWidget {
     this.importedLabs = const [],
     this.importedRegular = const [],
     this.saveLabs,
+    this.readSchoolLabs,
     this.saveRegular,
     this.backup,
     this.isDemo = false,
@@ -39,6 +41,7 @@ class ScheduleScreen extends StatefulWidget {
   final List<Course> importedLabs;
   final List<Course> importedRegular;
   final Future<List<Course>> Function(List<Course>)? saveLabs;
+  final Future<List<Course>?> Function()? readSchoolLabs;
   final Future<void> Function(RegularScheduleImport)? saveRegular;
   final CourseBackupService? backup;
   final bool isDemo;
@@ -325,24 +328,70 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     );
   }
 
-  Future<void> _importScreenshot(
+  Future<void> _importLabs(
     Future<List<Course>> Function(List<Course>) save,
   ) async {
+    final readSchool = widget.readSchoolLabs;
+    final method = await showModalBottomSheet<_LabImportMethod>(
+      context: context,
+      useSafeArea: true,
+      builder: (context) => SafeArea(
+        top: false,
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                '导入实验课',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+            if (readSchool != null)
+              ListTile(
+                leading: const Icon(Icons.school_outlined),
+                title: const Text('直接导入'),
+                subtitle: const Text('请先连接校园网，再登录实验选课系统。'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.pop(context, _LabImportMethod.direct),
+              ),
+            ListTile(
+              leading: const Icon(Icons.add_photo_alternate_outlined),
+              title: const Text('截图导入'),
+              subtitle: const Text('识别实验课表截图，核对后保存。'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.pop(context, _LabImportMethod.screenshot),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || method == null) return;
+
     var updated = _importedLabs;
+    Future<void> saveCourses(List<Course> courses) async {
+      try {
+        updated = await save(courses);
+      } on Object {
+        throw const FormatException('无法保存实验课，请重试。');
+      }
+    }
+
     final imported = await Navigator.of(context).push<List<Course>>(
       MaterialPageRoute(
-        builder: (context) => LabScreenshotImportScreen(
-          pickScreenshot: pickLabScreenshot,
-          recognizeScreenshot: (image) async =>
-              parseLabScreenshot(await recognizeLabScreenshot(image)),
-          saveCourses: (courses) async {
-            try {
-              updated = await save(courses);
-            } on Object {
-              throw const FormatException('无法保存实验课，请重试。');
-            }
-          },
-        ),
+        builder: (context) =>
+            method == _LabImportMethod.direct && readSchool != null
+            ? _LabDirectImportScreen(
+                readSchool: readSchool,
+                saveCourses: saveCourses,
+              )
+            : LabScreenshotImportScreen(
+                pickScreenshot: pickLabScreenshot,
+                recognizeScreenshot: (image) async =>
+                    parseLabScreenshot(await recognizeLabScreenshot(image)),
+                saveCourses: saveCourses,
+              ),
       ),
     );
     if (!mounted || imported == null || imported.isEmpty) return;
@@ -422,7 +471,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
                       : null,
                   onImport: widget.saveLabs == null
                       ? null
-                      : () => _importScreenshot(widget.saveLabs!),
+                      : () => _importLabs(widget.saveLabs!),
                   onImportRegular:
                       supportsSchoolScheduleImport && widget.saveRegular != null
                       ? () => _importRegular(widget.saveRegular!)
@@ -525,6 +574,169 @@ class _ScheduleScreenState extends State<ScheduleScreen>
   }
 }
 
+enum _LabImportMethod { direct, screenshot }
+
+class _LabDirectImportScreen extends StatefulWidget {
+  const _LabDirectImportScreen({
+    required this.readSchool,
+    required this.saveCourses,
+  });
+
+  final Future<List<Course>?> Function() readSchool;
+  final Future<void> Function(List<Course>) saveCourses;
+
+  @override
+  State<_LabDirectImportScreen> createState() => _LabDirectImportScreenState();
+}
+
+class _LabDirectImportScreenState extends State<_LabDirectImportScreen> {
+  List<Course> _courses = const [];
+  bool _reading = false;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_readSchool());
+    });
+  }
+
+  Future<void> _readSchool() async {
+    if (_reading || _saving) return;
+    setState(() {
+      _reading = true;
+      _error = null;
+      _courses = const [];
+    });
+    try {
+      final result = await widget.readSchool();
+      if (!mounted || result == null) return;
+      setState(() {
+        _courses = result;
+        if (result.isEmpty) _error = '没有读到实验课，请在学校页面打开实验课表。';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = switch (error) {
+          FormatException(:final message) when message.isNotEmpty => message,
+          PlatformException(:final message?) when message.isNotEmpty => message,
+          _ => '暂时无法读取实验课表，请检查校园网连接后重试。',
+        };
+      });
+    } finally {
+      if (mounted) setState(() => _reading = false);
+    }
+  }
+
+  Future<void> _save() async {
+    if (_reading || _saving || _courses.isEmpty) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await widget.saveCourses(_courses);
+      if (mounted) Navigator.pop(context, _courses);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = '无法保存实验课，请重试。');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final busy = _reading || _saving;
+    return PopScope<List<Course>>(
+      canPop: !_saving,
+      child: Scaffold(
+        appBar: AppBar(title: const Text('直接导入实验课')),
+        bottomNavigationBar: _courses.isEmpty
+            ? null
+            : SafeArea(
+                child: Center(
+                  heightFactor: 1,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 640),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          onPressed: busy ? null : _save,
+                          child: Text(_saving ? '正在保存' : '确认导入'),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+              children: [
+                if (_courses.isEmpty) ...[
+                  const Text(
+                    '请先连接校园网，再登录实验选课系统。如未显示课表，请打开「课程管理 → 课表及成绩查询」。',
+                    style: TextStyle(color: scheduleMuted, height: 1.5),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: busy ? null : _readSchool,
+                    icon: const Icon(Icons.school_outlined),
+                    label: Text(_reading ? '正在打开…' : '打开实验选课系统'),
+                  ),
+                ],
+                if (_error case final message?)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        message,
+                        style: TextStyle(color: theme.colorScheme.error),
+                      ),
+                    ),
+                  ),
+                if (_courses.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  Text(
+                    '读取到 ${_courses.length} 条实验课，请核对后导入。',
+                    style: theme.textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 6),
+                  for (final course in _courses)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(
+                        Icons.science_outlined,
+                        color: schedulePurple,
+                      ),
+                      title: Text(course.name),
+                      subtitle: Text(
+                        '第 ${course.week} 周 · ${weekdays[course.weekday - 1]}\n'
+                        '${course.startTime}–${course.endTime}'
+                        '${course.location.isEmpty ? '' : ' · ${course.location}'}',
+                      ),
+                      isThreeLine: true,
+                    ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ScheduleHeader extends StatelessWidget {
   const _ScheduleHeader({
     required this.demoLabel,
@@ -589,8 +801,8 @@ class _ScheduleHeader extends StatelessWidget {
             const SizedBox(width: 6),
             IconButton.filledTonal(
               onPressed: onImport,
-              tooltip: '导入实验课截图',
-              icon: const Icon(Icons.add_photo_alternate_outlined),
+              tooltip: '导入实验课',
+              icon: const Icon(Icons.science_outlined),
             ),
           ],
           if (onImportRegular != null) ...[

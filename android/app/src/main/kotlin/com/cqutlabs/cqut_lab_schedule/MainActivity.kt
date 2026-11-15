@@ -16,7 +16,7 @@ import kotlin.math.abs
 
 class MainActivity : FlutterActivity() {
     private val courseBackupFiles = CourseBackupFileChannel(this)
-    private var regularImportResult: MethodChannel.Result? = null
+    private var schoolImportResult: MethodChannel.Result? = null
     private val weekdayPattern = Regex("^星\\s*期[一二三四五六日天]$")
     private val rangePattern = Regex("^\\d{1,2}:\\d{2}\\s*[-–—~至]\\s*\\d{1,2}:\\d{2}$")
     private val weekPattern = Regex("^\\d{1,2}$")
@@ -41,7 +41,15 @@ class MainActivity : FlutterActivity() {
         MethodChannel(messenger, "com.cqutlabs.cqut_lab_schedule/regular_import")
             .setMethodCallHandler { call, result ->
                 if (call.method == "open") {
-                    openRegularImport(call.arguments as? String, result)
+                    openSchoolImport(call.arguments as? String, result, isLab = false)
+                } else {
+                    result.notImplemented()
+                }
+            }
+        MethodChannel(messenger, "com.cqutlabs.cqut_lab_schedule/lab_import")
+            .setMethodCallHandler { call, result ->
+                if (call.method == "open") {
+                    openSchoolImport(call.arguments as? String, result, isLab = true)
                 } else {
                     result.notImplemented()
                 }
@@ -49,18 +57,23 @@ class MainActivity : FlutterActivity() {
     }
 
     @Suppress("DEPRECATION") // FlutterActivity already owns Android activity result forwarding.
-    private fun openRegularImport(source: String?, result: MethodChannel.Result) {
+    private fun openSchoolImport(source: String?, result: MethodChannel.Result, isLab: Boolean) {
         when {
             source.isNullOrBlank() -> result.error("invalid_reader", "课表读取组件无法打开。", null)
-            regularImportResult != null -> result.error("import_busy", "正课导入已打开。", null)
+            schoolImportResult != null -> result.error("import_busy", "学校课表导入已打开。", null)
             else -> {
-                regularImportResult = result
-                val activity = Intent(this, RegularScheduleImportActivity::class.java)
-                    .putExtra(RegularScheduleImportActivity.EXTRA_READER, source)
+                schoolImportResult = result
+                val activity = if (isLab) {
+                    Intent(this, LabScheduleImportActivity::class.java)
+                        .putExtra(LabScheduleImportActivity.EXTRA_READER, source)
+                } else {
+                    Intent(this, RegularScheduleImportActivity::class.java)
+                        .putExtra(RegularScheduleImportActivity.EXTRA_READER, source)
+                }
                 try {
-                    startActivityForResult(activity, REGULAR_IMPORT_REQUEST)
+                    startActivityForResult(activity, if (isLab) LAB_IMPORT_REQUEST else REGULAR_IMPORT_REQUEST)
                 } catch (_: ActivityNotFoundException) {
-                    regularImportResult = null
+                    schoolImportResult = null
                     result.error("import_unavailable", "无法打开学校课表页。", null)
                 }
             }
@@ -71,16 +84,21 @@ class MainActivity : FlutterActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (courseBackupFiles.onActivityResult(requestCode, resultCode, data)) return
-        if (requestCode != REGULAR_IMPORT_REQUEST) return
-        val result = regularImportResult ?: return
-        regularImportResult = null
-        val error = data?.getStringExtra(RegularScheduleImportActivity.EXTRA_ERROR)
+        if (requestCode != REGULAR_IMPORT_REQUEST && requestCode != LAB_IMPORT_REQUEST) return
+        val result = schoolImportResult ?: return
+        schoolImportResult = null
+        val isLab = requestCode == LAB_IMPORT_REQUEST
+        val error = data?.getStringExtra(
+            if (isLab) LabScheduleImportActivity.EXTRA_ERROR else RegularScheduleImportActivity.EXTRA_ERROR,
+        )
         if (error != null) {
-            result.error("regular_import_failed", error, null)
+            result.error(if (isLab) "lab_import_failed" else "regular_import_failed", error, null)
         } else {
             result.success(
                 if (resultCode == Activity.RESULT_OK) {
-                    data?.getStringExtra(RegularScheduleImportActivity.EXTRA_SCHEDULE)
+                    data?.getStringExtra(
+                        if (isLab) LabScheduleImportActivity.EXTRA_SCHEDULE else RegularScheduleImportActivity.EXTRA_SCHEDULE,
+                    )
                 } else null,
             )
         }
@@ -175,5 +193,6 @@ class MainActivity : FlutterActivity() {
 
     private companion object {
         const val REGULAR_IMPORT_REQUEST = 4907
+        const val LAB_IMPORT_REQUEST = 4909
     }
 }

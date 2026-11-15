@@ -55,10 +55,20 @@ class ScheduleParser {
     for (final (index, row) in rows.indexed.skip(1)) {
       final cells = row.children
           .where((cell) => cell.localName == 'td')
-          .map((cell) => cell.text.replaceAll(_spaces, ' ').trim())
+          .map((cell) => cell.text)
           .toList();
       try {
-        courses.add(_parseRow(cells));
+        if (cells.length != 9) {
+          throw const FormatException('实验课表应有 9 列');
+        }
+        final grade = _normalize(cells[6]);
+        courses.add(
+          parseCourseFields(
+            cells.sublist(0, 6),
+            grade: grade.isEmpty ? null : grade,
+            evaluation: _normalize(cells[8]),
+          ),
+        );
       } on FormatException catch (error) {
         issues.add((rowNumber: index + 1, reason: error.message));
       }
@@ -67,10 +77,16 @@ class ScheduleParser {
     return ScheduleParseResult(courses, issues);
   }
 
-  Course _parseRow(List<String> cells) {
-    if (cells.length != 9) {
-      throw const FormatException('实验课表应有 9 列');
+  /// Parses the six columns common to file and school imports.
+  Course parseCourseFields(
+    List<String> fields, {
+    String? grade,
+    String evaluation = '',
+  }) {
+    if (fields.length != 6) {
+      throw const FormatException('实验课表缺少课程字段');
     }
+    final cells = fields.map(_normalize).toList();
     if (cells[0].isEmpty) {
       throw const FormatException('缺少实验名称');
     }
@@ -103,10 +119,12 @@ class ScheduleParser {
       endTime: _clockText(end),
       location: cells[4],
       teacher: cells[5],
-      grade: cells[6].isEmpty ? null : cells[6],
-      evaluation: cells[8],
+      grade: grade,
+      evaluation: evaluation,
     );
   }
+
+  String _normalize(String text) => text.replaceAll(_spaces, ' ').trim();
 
   int _minutes(String hourText, String minuteText) {
     final hour = int.parse(hourText);

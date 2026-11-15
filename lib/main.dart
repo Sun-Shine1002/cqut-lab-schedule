@@ -8,6 +8,7 @@ import 'services/course_backup_service.dart';
 import 'services/demo_regular_courses.dart';
 import 'services/imported_course_store.dart';
 import 'services/schedule_parser.dart';
+import 'services/school_lab_schedule_import.dart';
 import 'theme/schedule_theme.dart';
 
 Future<void> main() async {
@@ -35,6 +36,9 @@ Future<void> main() async {
         importedRegular: importedRegular.courses,
         termCalendar: importedRegular.calendar,
         saveLabs: labs.add,
+        readSchoolLabs: supportsSchoolLabScheduleImport
+            ? importSchoolLabSchedule
+            : null,
         saveRegular: (imported) =>
             regular.replace(imported.courses, calendar: imported.calendar),
         backup: const CourseBackupService(),
