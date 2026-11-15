@@ -1,6 +1,8 @@
 import 'package:cqut_lab_schedule/models/course.dart';
 import 'package:cqut_lab_schedule/models/term_calendar.dart';
 import 'package:cqut_lab_schedule/screens/schedule_screen.dart';
+import 'package:cqut_lab_schedule/services/course_backup_service.dart';
+import 'package:cqut_lab_schedule/services/course_document_parser.dart';
 import 'package:cqut_lab_schedule/services/demo_regular_courses.dart';
 import 'package:cqut_lab_schedule/services/schedule_parser.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +10,67 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
 void main() {
+  testWidgets('imports a file through the regular course entry', (
+    tester,
+  ) async {
+    const regular = Course(
+      kind: CourseKind.regular,
+      name: '已有正课',
+      week: 1,
+      weekday: DateTime.tuesday,
+      startTime: '08:30',
+      endTime: '10:10',
+      location: '',
+      teacher: '',
+    );
+    const lab = Course(
+      name: '文件里的数电实验',
+      week: 1,
+      weekday: DateTime.wednesday,
+      startTime: '10:30',
+      endTime: '12:10',
+      location: '实验楼 201',
+      teacher: '',
+    );
+    List<Course>? saved;
+    final calendar = TermCalendar(DateTime(2026, 9, 7), totalWeeks: 3);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ScheduleScreen(
+          courses: const [],
+          importedRegular: const [regular],
+          termCalendar: calendar,
+          now: () => DateTime(2026, 9, 7),
+          readCourseDocument: () async => const {
+            '计算机一班': CourseDocumentClass(courses: [lab]),
+          },
+          saveDocumentCourses: (courses) async {
+            saved = courses;
+            return CourseBackupData(
+              regularCourses: const [regular],
+              labCourses: courses,
+              termCalendar: calendar,
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('导入正课课表'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('其他导入'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('选择 Excel 或 Word 文件'));
+    await tester.pumpAndSettle();
+    expect(find.text('计算机一班'), findsOneWidget);
+    expect(saved, isNull);
+    await tester.tap(find.text('确认导入 1 条课程'));
+    await tester.pumpAndSettle();
+    expect(saved, [lab]);
+    expect(find.text('已有正课'), findsOneWidget);
+    expect(find.text('文件里的数电实验'), findsOneWidget);
+  });
+
   testWidgets('chooses both lab import methods and saves the direct preview', (
     tester,
   ) async {

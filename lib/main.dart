@@ -5,6 +5,7 @@ import 'models/course.dart';
 import 'models/term_calendar.dart';
 import 'screens/schedule_screen.dart';
 import 'services/course_backup_service.dart';
+import 'services/course_document_import.dart';
 import 'services/demo_regular_courses.dart';
 import 'services/imported_course_store.dart';
 import 'services/schedule_parser.dart';
@@ -41,6 +42,8 @@ Future<void> main() async {
             : null,
         saveRegular: (imported) =>
             regular.replace(imported.courses, calendar: imported.calendar),
+        readCourseDocument: chooseCourseDocument,
+        saveDocumentCourses: ImportedCourseStore.addCoursesByKind,
         backup: const CourseBackupService(),
         isDemo: true,
       ),

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:material_ui/material_ui.dart';
 
 import '../models/course.dart';
+import '../models/timetable_periods.dart';
 import '../theme/schedule_theme.dart';
 
 const _railWidth = 37.0;
@@ -15,21 +16,6 @@ final _campusPrefix = RegExp(r'^(?:两江|花溪|杨家坪)校区[\s，、,·-]*
 final _buildingAndRoom = RegExp(
   r'^(.*?(?:楼|馆|操场|实验室|教室))[\s·]*([A-Za-z]*\s*[0-9０-９][A-Za-z0-9０-９-]*(?:号|室)?)$',
 );
-
-// The reference timetable shows periods 1–10. Experimental times are mapped
-// onto the clock even when they begin or end outside those periods.
-const _periods = <(int, int)>[
-  (510, 555), // 08:30–09:15
-  (565, 610), // 09:25–10:10
-  (630, 675), // 10:30–11:15
-  (685, 730), // 11:25–12:10
-  (860, 905), // 14:20–15:05
-  (915, 960), // 15:15–16:00
-  (980, 1025), // 16:20–17:05
-  (1035, 1080), // 17:15–18:00
-  (1140, 1185), // 19:00–19:45
-  (1190, 1235), // 19:50–20:35
-];
 
 class TimetableWeekdayHeader extends StatelessWidget {
   const TimetableWeekdayHeader({
@@ -199,7 +185,7 @@ class TimetableGrid extends StatelessWidget {
     final timedCourses = [for (final course in courses) _TimedCourse(course)];
     final scale = _ClockScale(timedCourses);
     final positions = [
-      for (final (start, end) in _periods)
+      for (final (start, end) in twoRiversPeriods)
         (scale.offsetOf(start), scale.offsetOf(end)),
     ];
 
@@ -214,14 +200,14 @@ class TimetableGrid extends StatelessWidget {
               width: _railWidth,
               child: Stack(
                 children: [
-                  if (scale.start < _periods.first.$1)
+                  if (scale.start < twoRiversPeriods.first.$1)
                     Positioned(
                       top: 2,
                       left: 0,
                       right: 0,
                       child: _ClockLabel(minutes: scale.start),
                     ),
-                  for (final (index, (start, end)) in _periods.indexed)
+                  for (final (index, (start, end)) in twoRiversPeriods.indexed)
                     Positioned(
                       top: positions[index].$1,
                       height: _periodHeight,
@@ -233,7 +219,7 @@ class TimetableGrid extends StatelessWidget {
                         end: end,
                       ),
                     ),
-                  if (scale.end > _periods.last.$2)
+                  if (scale.end > twoRiversPeriods.last.$2)
                     Positioned(
                       bottom: 2,
                       left: 0,
@@ -536,12 +522,10 @@ class _ClockLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hour = (minutes ~/ 60).toString().padLeft(2, '0');
-    final minute = (minutes % 60).toString().padLeft(2, '0');
     return FittedBox(
       fit: BoxFit.scaleDown,
       child: Text(
-        '$hour:$minute',
+        timetableClockText(minutes),
         style: const TextStyle(color: scheduleMuted, fontSize: 9, height: 1.3),
       ),
     );
@@ -566,11 +550,11 @@ class _TimedCourse {
 class _ClockScale {
   _ClockScale(List<_TimedCourse> courses)
     : start = courses.fold(
-        _periods.first.$1,
+        twoRiversPeriods.first.$1,
         (earliest, course) => math.min(earliest, course.start),
       ),
       end = courses.fold(
-        _periods.last.$2,
+        twoRiversPeriods.last.$2,
         (latest, course) => math.max(latest, course.end),
       );
 
@@ -582,7 +566,7 @@ class _ClockScale {
   double offsetOf(int time) {
     var previousEnd = start;
     var offset = 0.0;
-    for (final (periodStart, periodEnd) in _periods) {
+    for (final (periodStart, periodEnd) in twoRiversPeriods) {
       final gap = periodStart - previousEnd;
       final gapHeight = switch (gap) {
         0 => 0.0,

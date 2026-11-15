@@ -54,19 +54,71 @@ class ImportedCourseStore {
 
   Future<List<Course>> add(List<Course> courses) => _write((snapshot) async {
     final existing = await _loadSection(snapshot);
-    final merged = {
-      for (final course in [...existing.courses, ...courses])
-        (
-          course.name.trim().replaceAll(RegExp(r'\s+'), ''),
-          course.week,
-          course.weekday,
-          course.startTime,
-          course.endTime,
-        ): course,
-    }.values.toList();
+    final merged = _merge(existing.courses, courses);
     snapshot[kind.name] = _encodeSection(merged, existing.calendar);
     return merged;
   });
+
+  static Future<CourseBackupData> addCoursesByKind(List<Course> courses) =>
+      _write((snapshot) async {
+        final regular = await ImportedCourseStore(CourseKind.regular)
+            ._loadSection(snapshot);
+        final lab = await ImportedCourseStore(CourseKind.lab)
+            ._loadSection(snapshot);
+        final incomingRegular = courses.where(
+          (course) => course.kind == CourseKind.regular,
+        );
+        final incomingLabs = courses.where(
+          (course) => course.kind == CourseKind.lab,
+        );
+        final mergedRegular = incomingRegular.isEmpty
+            ? regular.courses
+            : _merge(regular.courses, incomingRegular, keepExisting: true);
+        final mergedLabs = incomingLabs.isEmpty
+            ? lab.courses
+            : _merge(lab.courses, incomingLabs, keepExisting: true);
+        if (incomingRegular.isNotEmpty) {
+          snapshot[CourseKind.regular.name] = _encodeSection(
+            mergedRegular,
+            regular.calendar,
+          );
+        }
+        if (incomingLabs.isNotEmpty) {
+          snapshot[CourseKind.lab.name] = _encodeSection(
+            mergedLabs,
+            lab.calendar,
+          );
+        }
+        return CourseBackupData(
+          regularCourses: mergedRegular,
+          labCourses: mergedLabs,
+          termCalendar: regular.calendar,
+        );
+      });
+
+  static List<Course> _merge(
+    Iterable<Course> existing,
+    Iterable<Course> incoming, {
+    bool keepExisting = false,
+  }) {
+    (String, int, int, String, String) key(Course course) => (
+      course.name.trim().replaceAll(RegExp(r'\s+'), ''),
+      course.week,
+      course.weekday,
+      course.startTime,
+      course.endTime,
+    );
+
+    final merged = {for (final course in existing) key(course): course};
+    for (final course in incoming) {
+      if (keepExisting) {
+        merged.putIfAbsent(key(course), () => course);
+      } else {
+        merged[key(course)] = course;
+      }
+    }
+    return merged.values.toList();
+  }
 
   Future<void> replace(List<Course> courses, {TermCalendar? calendar}) =>
       _write((snapshot) async {

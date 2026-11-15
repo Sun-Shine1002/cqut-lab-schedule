@@ -7,6 +7,7 @@ import '../models/course.dart';
 import '../models/term_calendar.dart';
 import '../services/app_update.dart';
 import '../services/course_backup_service.dart';
+import '../services/course_document_parser.dart';
 import '../services/lab_screenshot_parser.dart';
 import '../services/regular_schedule_parser.dart';
 import '../services/school_schedule_import.dart';
@@ -16,6 +17,7 @@ import '../widgets/course_card.dart';
 import '../widgets/timetable_grid.dart';
 import 'app_update_screen.dart';
 import 'course_backup_screen.dart';
+import 'course_document_import_screen.dart';
 import 'lab_screenshot_import_screen.dart';
 import 'regular_schedule_import_screen.dart';
 
@@ -29,6 +31,8 @@ class ScheduleScreen extends StatefulWidget {
     this.saveLabs,
     this.readSchoolLabs,
     this.saveRegular,
+    this.readCourseDocument,
+    this.saveDocumentCourses,
     this.backup,
     this.isDemo = false,
     this.termCalendar,
@@ -43,6 +47,9 @@ class ScheduleScreen extends StatefulWidget {
   final Future<List<Course>> Function(List<Course>)? saveLabs;
   final Future<List<Course>?> Function()? readSchoolLabs;
   final Future<void> Function(RegularScheduleImport)? saveRegular;
+  final Future<Map<String, CourseDocumentClass>?> Function()?
+  readCourseDocument;
+  final Future<CourseBackupData> Function(List<Course>)? saveDocumentCourses;
   final CourseBackupService? backup;
   final bool isDemo;
   final TermCalendar? termCalendar;
@@ -70,6 +77,10 @@ class _ScheduleScreenState extends State<ScheduleScreen>
   bool get _canCheckForUpdate =>
       widget.checkForUpdate != null ||
       (AppUpdate.supported && AppUpdate.configured);
+
+  bool get _canImportRegular =>
+      (supportsSchoolScheduleImport && widget.saveRegular != null) ||
+      (widget.readCourseDocument != null && widget.saveDocumentCourses != null);
 
   Iterable<Course> get _courses => [
     ...(_importedRegular.isEmpty ? widget.courses : _importedRegular),
@@ -303,18 +314,57 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     );
   }
 
-  Future<void> _importRegular(
-    Future<void> Function(RegularScheduleImport) save,
-  ) async {
-    final imported = await Navigator.of(context).push<RegularScheduleImport>(
+  Future<void> _importRegular() async {
+    final readFile = widget.readCourseDocument;
+    final saveFromFile = widget.saveDocumentCourses;
+    final saveSchool = widget.saveRegular;
+    CourseBackupData? savedDocument;
+    final imported = await Navigator.of(context).push<Object>(
       MaterialPageRoute(
-        builder: (context) => RegularScheduleImportScreen(
-          readSchool: importSchoolSchedule,
-          saveCourses: save,
+        builder: (importContext) => RegularScheduleImportScreen(
+          readSchool: supportsSchoolScheduleImport && saveSchool != null
+              ? importSchoolSchedule
+              : null,
+          saveCourses: saveSchool,
+          openOtherImport: readFile != null && saveFromFile != null
+              ? () async {
+                  final selected = await Navigator.of(importContext)
+                      .push<List<Course>>(
+                        MaterialPageRoute(
+                          builder: (context) => CourseDocumentImportScreen(
+                            readFile: readFile,
+                            termCalendar: _calendar,
+                            saveCourses: (courses) async {
+                              savedDocument = await saveFromFile(courses);
+                            },
+                          ),
+                        ),
+                      );
+                  if (importContext.mounted && selected != null) {
+                    Navigator.pop<Object>(importContext, selected);
+                  }
+                }
+              : null,
         ),
       ),
     );
-    if (!mounted || imported == null || imported.courses.isEmpty) return;
+    if (!mounted) return;
+    final saved = savedDocument;
+    if (imported is List<Course> && imported.isNotEmpty && saved != null) {
+      setState(() {
+        _importedRegular = saved.regularCourses;
+        _importedLabs = saved.labCourses;
+        final week = imported.first.week;
+        _selectedWeek = week == _calendar.weekOf(_today) ? null : week;
+        _kind = null;
+      });
+      _syncWeekPage();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('已导入 ${imported.length} 条文件课程')));
+      return;
+    }
+    if (imported is! RegularScheduleImport || imported.courses.isEmpty) return;
     setState(() {
       _importedRegular = imported.courses;
       _calendar = imported.calendar ?? TermCalendar.cqutFall2026;
@@ -471,10 +521,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
                   onImport: widget.saveLabs == null
                       ? null
                       : () => _importLabs(widget.saveLabs!),
-                  onImportRegular:
-                      supportsSchoolScheduleImport && widget.saveRegular != null
-                      ? () => _importRegular(widget.saveRegular!)
-                      : null,
+                  onImportRegular: _canImportRegular ? _importRegular : null,
                   onBackup: widget.backup == null
                       ? null
                       : () => _openBackup(widget.backup!),

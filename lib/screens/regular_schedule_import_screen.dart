@@ -10,10 +10,12 @@ class RegularScheduleImportScreen extends StatefulWidget {
     super.key,
     required this.readSchool,
     required this.saveCourses,
+    this.openOtherImport,
   });
 
-  final Future<String?> Function() readSchool;
-  final Future<void> Function(RegularScheduleImport) saveCourses;
+  final Future<String?> Function()? readSchool;
+  final Future<void> Function(RegularScheduleImport)? saveCourses;
+  final Future<void> Function()? openOtherImport;
 
   @override
   State<RegularScheduleImportScreen> createState() =>
@@ -28,13 +30,14 @@ class _RegularScheduleImportScreenState
   String? _error;
 
   Future<void> _readSchool() async {
-    if (_reading || _saving) return;
+    final readSchool = widget.readSchool;
+    if (_reading || _saving || readSchool == null) return;
     setState(() {
       _reading = true;
       _error = null;
     });
     try {
-      final source = await widget.readSchool();
+      final source = await readSchool();
       if (!mounted || source == null) return;
       final parsed = parseRegularScheduleImport(source);
       setState(() => _preview = parsed);
@@ -49,13 +52,14 @@ class _RegularScheduleImportScreenState
   }
 
   Future<void> _save(RegularScheduleImport schedule) async {
-    if (_reading || _saving) return;
+    final saveCourses = widget.saveCourses;
+    if (_reading || _saving || saveCourses == null) return;
     setState(() {
       _saving = true;
       _error = null;
     });
     try {
-      await widget.saveCourses(schedule);
+      await saveCourses(schedule);
       if (mounted) Navigator.pop(context, schedule);
     } catch (error) {
       if (!mounted) return;
@@ -70,7 +74,7 @@ class _RegularScheduleImportScreenState
     final preview = _preview;
     final busy = _reading || _saving;
     final theme = Theme.of(context);
-    return PopScope<RegularScheduleImport>(
+    return PopScope<Object>(
       canPop: !_saving,
       child: Scaffold(
         appBar: AppBar(title: const Text('导入正课课表')),
@@ -80,25 +84,35 @@ class _RegularScheduleImportScreenState
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
               children: [
-                FilledButton.icon(
-                  onPressed: busy ? null : _readSchool,
-                  icon: const Icon(Icons.school_outlined),
-                  label: Text(_reading ? '正在读取' : '从学校导入'),
-                ),
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(4, 8, 4, 12),
-                  child: Text(
-                    '在学校页面登录并打开个人课表，然后点「读取课表」。',
-                    style: TextStyle(color: scheduleMuted, height: 1.5),
+                if (widget.readSchool != null) ...[
+                  FilledButton.icon(
+                    onPressed: busy ? null : _readSchool,
+                    icon: const Icon(Icons.school_outlined),
+                    label: Text(_reading ? '正在读取' : '从学校导入'),
                   ),
-                ),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 4),
-                  child: Text(
-                    '课程导入功能参考 GitHub 开源项目“拾光课程表”。',
-                    style: TextStyle(color: scheduleMuted, height: 1.5),
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(4, 8, 4, 12),
+                    child: Text(
+                      '在学校页面登录并打开个人课表，然后点「读取课表」。',
+                      style: TextStyle(color: scheduleMuted, height: 1.5),
+                    ),
                   ),
-                ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 4),
+                    child: Text(
+                      '课程导入功能参考 GitHub 开源项目“拾光课程表”。',
+                      style: TextStyle(color: scheduleMuted, height: 1.5),
+                    ),
+                  ),
+                ],
+                if (widget.openOtherImport case final openOtherImport?) ...[
+                  if (widget.readSchool != null) const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    onPressed: busy ? null : openOtherImport,
+                    icon: const Icon(Icons.file_open_outlined),
+                    label: const Text('其他导入'),
+                  ),
+                ],
                 if (preview != null) ...[
                   const SizedBox(height: 16),
                   _SchedulePreview(courses: preview.courses),
