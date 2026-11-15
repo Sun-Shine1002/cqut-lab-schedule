@@ -36,7 +36,7 @@ void main() {
     final importButton = find.byTooltip('导入实验课');
     await tester.tap(importButton);
     await tester.pumpAndSettle();
-    expect(find.text('请先连接校园网，再登录实验选课系统。'), findsOneWidget);
+    expect(find.text('请先连接校园网，点击跳转登录实验选课系统。'), findsOneWidget);
 
     await tester.tap(find.text('截图导入'));
     await tester.pumpAndSettle();
@@ -82,7 +82,8 @@ void main() {
       expect(find.text('第 10 周'), findsOneWidget);
       expect(find.text('11/02'), findsOneWidget);
       expect(find.text('11/14'), findsNothing);
-      expect(find.text('本周没有课程'), findsOneWidget);
+      expect(find.text('本周没有课程'), findsNothing);
+      expect(find.text('08:30'), findsWidgets);
 
       await tester.tap(find.byTooltip('下一周'));
       await tester.pumpAndSettle();
@@ -222,7 +223,7 @@ void main() {
 
     await tester.tap(find.byTooltip('上一周'));
     await tester.pumpAndSettle();
-    expect(find.text('本周没有课程'), findsOneWidget);
+    expect(find.text('本周没有课程'), findsNothing);
 
     await tester.tap(find.byTooltip('下一周'));
     await tester.pumpAndSettle();

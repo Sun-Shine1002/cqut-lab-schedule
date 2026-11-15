@@ -283,16 +283,15 @@ class _ScheduleScreenState extends State<ScheduleScreen>
                     ),
                   ],
                 ),
-                if (courses.isEmpty)
+                if (courses.isEmpty && _kind != null)
                   IgnorePointer(
                     child: Align(
                       alignment: const Alignment(0, -.30),
                       child: Chip(
-                        label: Text(switch (_kind) {
-                          null => '本周没有课程',
-                          CourseKind.regular => '本周没有正课',
-                          CourseKind.lab => '本周没有实验课',
-                        }, style: const TextStyle(color: scheduleMuted)),
+                        label: Text(
+                          _kind == CourseKind.regular ? '本周没有正课' : '本周没有实验课',
+                          style: const TextStyle(color: scheduleMuted),
+                        ),
                       ),
                     ),
                   ),
@@ -352,7 +351,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
               ListTile(
                 leading: const Icon(Icons.school_outlined),
                 title: const Text('直接导入'),
-                subtitle: const Text('请先连接校园网，再登录实验选课系统。'),
+                subtitle: const Text('请先连接校园网，点击跳转登录实验选课系统。'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.pop(context, _LabImportMethod.direct),
               ),
