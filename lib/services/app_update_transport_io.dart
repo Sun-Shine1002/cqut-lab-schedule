@@ -3,21 +3,28 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 
+import 'app_update_url_policy.dart';
+
 const _connectTimeout = Duration(seconds: 25);
 const _stallTimeout = Duration(seconds: 90);
 const _maxManifestBytes = 64 * 1024;
 const _maxApkBytes = 512 * 1024 * 1024;
 
-bool validUrl(Uri uri) =>
-    uri.scheme == 'https' && uri.host.isNotEmpty && uri.userInfo.isEmpty;
-
-Future<HttpClientResponse> _get(HttpClient client, Uri uri) async {
+Future<HttpClientResponse> _get(
+  HttpClient client,
+  Uri uri, {
+  required bool sameOrigin,
+  bool revalidate = false,
+}) async {
+  final initial = uri;
   for (var redirects = 0; redirects <= 5; redirects++) {
-    if (!validUrl(uri)) {
+    if (!validUpdateUrl(uri)) {
       throw const FormatException('更新地址必须使用 HTTPS。');
     }
     final request = await client.getUrl(uri).timeout(_connectTimeout);
     request.followRedirects = false;
+    if (revalidate)
+      request.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
     final response = await request.close().timeout(_connectTimeout);
     if (response.statusCode == HttpStatus.ok) return response;
     final location = response.headers.value(HttpHeaders.locationHeader);
@@ -25,26 +32,47 @@ Future<HttpClientResponse> _get(HttpClient client, Uri uri) async {
       throw HttpException('服务器返回 HTTP ${response.statusCode}。');
     }
     await response.drain<void>().timeout(_connectTimeout);
-    uri = uri.resolve(location);
+    final next = uri.resolve(location);
+    if (sameOrigin && !allowMirrorRedirect(initial, uri, next)) {
+      throw const FormatException('国内下载地址发生了跨站跳转。');
+    }
+    uri = next;
   }
   throw const HttpException('更新地址跳转次数过多。');
 }
 
-Future<String> readManifest(Uri uri) async {
-  final client = HttpClient()..connectionTimeout = _connectTimeout;
+Future<String> readManifest(
+  Uri uri, {
+  required Duration timeout,
+  required bool sameOrigin,
+}) async {
+  final client = HttpClient()..connectionTimeout = timeout;
   try {
-    final response = await _get(client, uri);
-    final bytes = <int>[];
-    await for (final chunk in response.timeout(_connectTimeout)) {
-      if (bytes.length + chunk.length > _maxManifestBytes) {
-        throw const FormatException('更新信息超出大小限制。');
-      }
-      bytes.addAll(chunk);
-    }
-    return utf8.decode(bytes);
+    return await _readBoundedManifest(client, uri, sameOrigin).timeout(timeout);
   } finally {
     client.close(force: true);
   }
+}
+
+Future<String> _readBoundedManifest(
+  HttpClient client,
+  Uri uri,
+  bool sameOrigin,
+) async {
+  final response = await _get(
+    client,
+    uri,
+    sameOrigin: sameOrigin,
+    revalidate: true,
+  );
+  final bytes = <int>[];
+  await for (final chunk in response) {
+    if (bytes.length + chunk.length > _maxManifestBytes) {
+      throw const FormatException('更新信息超出大小限制。');
+    }
+    bytes.addAll(chunk);
+  }
+  return utf8.decode(bytes);
 }
 
 Future<String> downloadApk(
@@ -52,8 +80,9 @@ Future<String> downloadApk(
   String cachePath,
   int versionCode,
   String expectedHash,
-  void Function(int, int?) onProgress,
-) async {
+  void Function(int, int?) onProgress, {
+  required bool sameOrigin,
+}) async {
   try {
     return await _downloadApk(
       uri,
@@ -61,6 +90,7 @@ Future<String> downloadApk(
       versionCode,
       expectedHash,
       onProgress,
+      sameOrigin: sameOrigin,
     );
   } on FileSystemException {
     throw const FormatException('无法保存安装包，请检查手机存储空间。');
@@ -72,8 +102,9 @@ Future<String> _downloadApk(
   String cachePath,
   int versionCode,
   String expectedHash,
-  void Function(int, int?) onProgress,
-) async {
+  void Function(int, int?) onProgress, {
+  required bool sameOrigin,
+}) async {
   final directory = await Directory(cachePath).create(recursive: true);
   final separator = Platform.pathSeparator;
   final apk = File('${directory.path}${separator}cqut-$versionCode.apk');
@@ -84,7 +115,7 @@ Future<String> _downloadApk(
   final partial = File('${apk.path}.part');
   final client = HttpClient()..connectionTimeout = _connectTimeout;
   try {
-    final response = await _get(client, uri);
+    final response = await _get(client, uri, sameOrigin: sameOrigin);
     final total = response.contentLength;
     if (total > _maxApkBytes) {
       throw const FormatException('安装包超出大小限制。');

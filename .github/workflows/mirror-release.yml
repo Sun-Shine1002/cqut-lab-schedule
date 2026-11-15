@@ -1,0 +1,71 @@
+name: Sync release mirror
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cqut-release-mirror
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref_name == github.event.repository.default_branch) ||
+      (github.event_name == 'release' && !github.event.release.prerelease)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CQUT_COS_BUCKET: ${{ vars.CQUT_COS_BUCKET }}
+      CQUT_COS_REGION: ${{ vars.CQUT_COS_REGION }}
+      CQUT_MIRROR_BASE_URL: ${{ vars.CQUT_MIRROR_BASE_URL }}
+      CQUT_CNB_REPOSITORY: ${{ vars.CQUT_CNB_REPOSITORY }}
+    steps:
+      - name: Check mirror configuration
+        id: mirror
+        shell: bash
+        run: |
+          if [[ -n "$CQUT_CNB_REPOSITORY" ]]; then
+            if [[ -n "$CQUT_MIRROR_BASE_URL" || -n "$CQUT_COS_BUCKET" || -n "$CQUT_COS_REGION" ]]; then
+              echo "::error::Configure either a CNB repository or a Tencent COS bucket."
+              exit 1
+            fi
+            echo "provider=cnb" >> "$GITHUB_OUTPUT"
+          elif [[ -z "$CQUT_MIRROR_BASE_URL" && -z "$CQUT_COS_BUCKET" && -z "$CQUT_COS_REGION" ]]; then
+            echo "::notice::No download mirror is configured."
+            echo "provider=none" >> "$GITHUB_OUTPUT"
+          elif [[ -z "$CQUT_MIRROR_BASE_URL" || -z "$CQUT_COS_BUCKET" || -z "$CQUT_COS_REGION" ]]; then
+            echo "::error::Set CQUT_MIRROR_BASE_URL, CQUT_COS_BUCKET, and CQUT_COS_REGION together."
+            exit 1
+          else
+            echo "provider=cos" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check out release tooling from the default branch
+        if: steps.mirror.outputs.provider != 'none'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Install Tencent COS SDK
+        if: steps.mirror.outputs.provider == 'cos'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/cqut-mirror"
+          "$RUNNER_TEMP/cqut-mirror/bin/pip" install 'cos-python-sdk-v5==1.9.45'
+      - name: Verify and sync the latest official release to COS
+        if: steps.mirror.outputs.provider == 'cos'
+        env:
+          CQUT_COS_SECRET_ID: ${{ secrets.CQUT_COS_SECRET_ID }}
+          CQUT_COS_SECRET_KEY: ${{ secrets.CQUT_COS_SECRET_KEY }}
+        run: |
+          "$RUNNER_TEMP/cqut-mirror/bin/python" .github/scripts/sync_mirror.py
+      - name: Verify and sync the latest official release to CNB
+        if: steps.mirror.outputs.provider == 'cnb'
+        env:
+          CQUT_CNB_RELEASE_TOKEN: ${{ secrets.CQUT_CNB_RELEASE_TOKEN }}
+        run: python3 .github/scripts/sync_cnb.py

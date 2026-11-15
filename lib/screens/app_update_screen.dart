@@ -21,11 +21,13 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
   AppRelease? _release;
   String? _readyPath;
   String? _message;
+  UpdateDownloadSource? _activeSource;
   double? _progress;
   var _checking = false;
   var _downloading = false;
   var _installing = false;
   var _needsPermission = false;
+  var _mirrorFailed = false;
 
   @override
   void initState() {
@@ -34,11 +36,13 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
   }
 
   Future<void> _check({bool useAvailable = false}) async {
+    if (_checking || _downloading || _installing) return;
     setState(() {
       _checking = true;
       _release = null;
       _readyPath = null;
       _needsPermission = false;
+      _mirrorFailed = false;
       _message = null;
     });
     try {
@@ -66,7 +70,8 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
     }
   }
 
-  Future<void> _update() async {
+  Future<void> _update(UpdateDownloadSource source) async {
+    if (_checking || _downloading || _installing) return;
     final installed = _installed!;
     final release = _release!;
     var path = _readyPath;
@@ -76,6 +81,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
       _progress = null;
       _downloading = path == null;
       _installing = path != null;
+      _activeSource = source;
     });
     try {
       path ??= await AppUpdate.download(installed, release, (received, total) {
@@ -84,7 +90,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
         if (_progress == null || progress - _progress! >= .01) {
           setState(() => _progress = progress);
         }
-      });
+      }, source: source);
       if (!mounted) return;
       setState(() {
         _readyPath = path;
@@ -103,11 +109,11 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
             : error.message ?? '无法安装更新，请重试。';
       });
     } on FormatException catch (error) {
-      if (mounted) setState(() => _message = error.message);
+      _showDownloadFailure(source, error.message);
     } on TimeoutException {
-      if (mounted) setState(() => _message = '下载超时，请切换网络后重试。');
+      _showDownloadFailure(source, '下载超时，请重试。');
     } on Exception {
-      if (mounted) setState(() => _message = '下载中断，请检查网络后重试。');
+      _showDownloadFailure(source, '无法下载，请检查网络后重试。');
     } finally {
       if (mounted) {
         setState(() {
@@ -116,6 +122,15 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
         });
       }
     }
+  }
+
+  void _showDownloadFailure(UpdateDownloadSource source, String detail) {
+    if (!mounted) return;
+    setState(() {
+      if (source == UpdateDownloadSource.mirror) _mirrorFailed = true;
+      final label = source == UpdateDownloadSource.mirror ? '国内线路' : 'GitHub';
+      _message = '$label：$detail';
+    });
   }
 
   Future<void> _openSettings() async {
@@ -158,7 +173,13 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                 ],
                 if (_checking || _downloading) ...[
                   const SizedBox(height: 16),
-                  Text(_checking ? '正在检查更新…' : '正在下载安装包…'),
+                  Text(
+                    _checking
+                        ? '正在检查更新…'
+                        : _activeSource == UpdateDownloadSource.mirror
+                        ? '正在从国内线路下载…'
+                        : '正在从 GitHub 下载…',
+                  ),
                   const SizedBox(height: 8),
                   LinearProgressIndicator(value: _progress),
                 ],
@@ -170,9 +191,25 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                 const SizedBox(height: 16),
                 if (release != null) ...[
                   FilledButton(
-                    onPressed: busy ? null : _update,
-                    child: Text(_readyPath == null ? '下载并安装' : '安装更新'),
+                    onPressed: busy
+                        ? null
+                        : () => _update(release.preferredSource),
+                    child: Text(
+                      _readyPath != null
+                          ? '安装更新'
+                          : release.preferredSource ==
+                                UpdateDownloadSource.mirror
+                          ? (_mirrorFailed ? '重试国内下载' : '从国内线路下载')
+                          : '从 GitHub 下载',
+                    ),
                   ),
+                  if (_mirrorFailed && _readyPath == null)
+                    OutlinedButton(
+                      onPressed: busy
+                          ? null
+                          : () => _update(UpdateDownloadSource.github),
+                      child: const Text('改用 GitHub 原始下载'),
+                    ),
                   const SizedBox(height: 8),
                   Text(
                     _scanInstructions,

@@ -11,7 +11,9 @@ param(
 
     [string] $AndroidSdk = $env:ANDROID_HOME,
     [string] $FlutterCommand = 'flutter',
-    [string] $ApkPath
+    [string] $ApkPath,
+    [string] $MirrorBaseUrl = $env:CQUT_MIRROR_BASE_URL,
+    [string] $CnbRepository = $env:CQUT_CNB_REPOSITORY
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,6 +33,23 @@ $tag = "v$versionName"
 $apkName = 'cqut-schedule.apk'
 $outputDirectory = Join-Path $projectRoot "build/releases/$tag"
 $updateUrl = "https://github.com/$Repository/releases/latest/download/update.json"
+$mirrorUpdateUrl = $null
+if ($CnbRepository) {
+    if ($MirrorBaseUrl -or $CnbRepository -notmatch '^[a-zA-Z0-9][a-zA-Z0-9_.-]*(/[a-zA-Z0-9][a-zA-Z0-9_.-]*)+$' -or
+        $CnbRepository.EndsWith('.git', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Provide a CNB repository path (group/project) and omit -MirrorBaseUrl.'
+    }
+    $mirrorUpdateUrl = "https://cnb.cool/$CnbRepository/-/releases/download/latest/update.json"
+} elseif ($MirrorBaseUrl) {
+    $base = $MirrorBaseUrl.TrimEnd('/')
+    $uri = [uri] $base
+    if (-not $uri.IsAbsoluteUri -or $uri.Scheme -ne 'https' -or -not $uri.Host -or
+        $uri.UserInfo -or $uri.AbsolutePath -ne '/' -or $uri.Query -or $uri.Fragment -or
+        $base -match '\s' -or $uri.Host -match '\.(myqcloud\.com|tencentcos\.cn)$') {
+        throw 'Use a custom HTTPS domain for APK downloads in -MirrorBaseUrl.'
+    }
+    $mirrorUpdateUrl = "$base/updates/update.json"
+}
 if (Test-Path -LiteralPath $outputDirectory) {
     throw "Release directory already exists: $outputDirectory"
 }
@@ -55,7 +74,11 @@ if (-not $ApkPath) {
     }
     Push-Location -LiteralPath $projectRoot
     try {
-        & $FlutterCommand build apk --release "--dart-define=CQUT_UPDATE_URL=$updateUrl"
+        $buildArguments = @('build', 'apk', '--release', "--dart-define=CQUT_UPDATE_URL=$updateUrl")
+        if ($mirrorUpdateUrl) {
+            $buildArguments += "--dart-define=CQUT_UPDATE_MIRROR_URL=$mirrorUpdateUrl"
+        }
+        & $FlutterCommand @buildArguments
         if ($LASTEXITCODE -ne 0) { throw 'Flutter release build failed.' }
     } finally {
         Pop-Location
@@ -81,6 +104,13 @@ if ($LASTEXITCODE -ne 0) { throw 'APK signature verification failed.' }
 if ($signers -match 'certificate DN:.*\bCN=Android Debug\b') {
     throw 'Use the release key to sign the APK. This APK uses an Android debug certificate.'
 }
+$certificate = '12fede291ce62c6a2466dd95fe80b0e548b1003f7b398cba73e066e76bfb1f89'
+$publisherCertificates = @($signers | ForEach-Object {
+    if ($_ -match 'certificate SHA-256 digest: ([a-fA-F0-9]{64})$') { $Matches[1] }
+} | Select-Object -Unique)
+if ($publisherCertificates.Count -ne 1 -or $publisherCertificates[0] -ne $certificate) {
+    throw 'APK certificate must match the signing certificate used in published CQUT releases.'
+}
 
 $null = New-Item -ItemType Directory -Path $outputDirectory
 $asset = Join-Path $outputDirectory $apkName
@@ -98,3 +128,4 @@ $manifestPath = Join-Path $outputDirectory 'update.json'
 Write-Output "Release tag: $tag"
 Write-Output "Attach both files: $asset and $manifestPath"
 Write-Output "App update URL: $updateUrl"
+if ($mirrorUpdateUrl) { Write-Output "App mirror update URL: $mirrorUpdateUrl" }
