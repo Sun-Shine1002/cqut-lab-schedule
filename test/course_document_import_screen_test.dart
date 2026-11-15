@@ -1,11 +1,118 @@
+import 'dart:async';
+
 import 'package:cqut_lab_schedule/models/course.dart';
 import 'package:cqut_lab_schedule/models/term_calendar.dart';
 import 'package:cqut_lab_schedule/screens/course_document_import_screen.dart';
+import 'package:cqut_lab_schedule/services/course_document_import.dart';
 import 'package:cqut_lab_schedule/services/course_document_parser.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
 void main() {
+  testWidgets('previews shared files and ignores a superseded local read', (
+    tester,
+  ) async {
+    final inbox = ValueNotifier<SharedCourseDocument?>(
+      SharedCourseDocument(classes: _classesWith('聊天中的光学实验')),
+    );
+    addTearDown(inbox.dispose);
+    final pendingLocalFile = Completer<Map<String, CourseDocumentClass>?>();
+    final openedApps = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CourseDocumentImportScreen(
+          readFile: () => pendingLocalFile.future,
+          saveCourses: (_) async {},
+          openMessagingApp: (source) async => openedApps.add(source),
+          sharedDocument: inbox,
+        ),
+      ),
+    );
+    expect(find.text('聊天中的光学实验'), findsOneWidget);
+    expect(find.textContaining('用其他应用打开'), findsOneWidget);
+    await tester.tap(find.text('打开微信'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('打开 QQ'));
+    await tester.pumpAndSettle();
+    expect(openedApps, ['wechat', 'qq']);
+
+    await tester.tap(find.text('选择 Excel 或 Word 文件'));
+    await tester.pumpAndSettle();
+    inbox.value = SharedCourseDocument(classes: _classesWith('新的聊天附件'));
+    await tester.pumpAndSettle();
+    expect(find.text('新的聊天附件'), findsOneWidget);
+    pendingLocalFile.complete(_classesWith('较早选择的本地课表'));
+    await tester.pumpAndSettle();
+    expect(find.text('较早选择的本地课表'), findsNothing);
+    expect(find.text('新的聊天附件'), findsOneWidget);
+
+    inbox.value = const SharedCourseDocument(error: '共享文件无法读取');
+    await tester.pumpAndSettle();
+    expect(find.text('共享文件无法读取'), findsOneWidget);
+  });
+
+  testWidgets('keeps the saved courses and waits for its own route to resume', (
+    tester,
+  ) async {
+    final navigator = GlobalKey<NavigatorState>();
+    final inbox = ValueNotifier<SharedCourseDocument?>(
+      SharedCourseDocument(classes: _classesWith('本次确认的实验')),
+    );
+    addTearDown(inbox.dispose);
+    final pendingSave = Completer<void>();
+    List<Course>? saved;
+    List<Course>? returned;
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorKey: navigator,
+        home: const Scaffold(body: Text('课表首页')),
+      ),
+    );
+    final nav = navigator.currentState!;
+    unawaited(
+      nav
+          .push<List<Course>>(
+            MaterialPageRoute(
+              builder: (_) => CourseDocumentImportScreen(
+                readFile: () async => null,
+                sharedDocument: inbox,
+                saveCourses: (courses) async {
+                  saved = courses;
+                  await pendingSave.future;
+                },
+              ),
+            ),
+          )
+          .then((courses) => returned = courses),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('确认导入 1 条课程'));
+    await tester.pumpAndSettle();
+
+    inbox.value = SharedCourseDocument(classes: _classesWith('另一个附件'));
+    await tester.pumpAndSettle();
+    expect(find.text('本次确认的实验'), findsOneWidget);
+    expect(find.text('另一个附件'), findsNothing);
+    unawaited(
+      nav.push<void>(
+        MaterialPageRoute(
+          builder: (_) => const Scaffold(body: Text('暂时覆盖导入页面')),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    pendingSave.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('暂时覆盖导入页面'), findsOneWidget);
+    expect(returned, isNull);
+
+    nav.pop();
+    await tester.pumpAndSettle();
+    expect(find.text('课表首页'), findsOneWidget);
+    expect(saved?.single.name, '本次确认的实验');
+    expect(returned, saved);
+  });
+
   testWidgets(
     'selects a class and saves only the checked experiment sessions',
     (tester) async {
@@ -117,6 +224,10 @@ void main() {
     },
   );
 }
+
+Map<String, CourseDocumentClass> _classesWith(String name) => {
+  '01 班': CourseDocumentClass(courses: [_course(name, '09:00')]),
+};
 
 Course _course(
   String name,

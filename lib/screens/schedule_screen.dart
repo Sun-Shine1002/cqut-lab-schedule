@@ -7,6 +7,7 @@ import '../models/course.dart';
 import '../models/term_calendar.dart';
 import '../services/app_update.dart';
 import '../services/course_backup_service.dart';
+import '../services/course_document_import.dart';
 import '../services/course_document_parser.dart';
 import '../services/lab_screenshot_parser.dart';
 import '../services/regular_schedule_parser.dart';
@@ -32,6 +33,7 @@ class ScheduleScreen extends StatefulWidget {
     this.readSchoolLabs,
     this.saveRegular,
     this.readCourseDocument,
+    this.documentSharing,
     this.saveDocumentCourses,
     this.backup,
     this.isDemo = false,
@@ -49,6 +51,7 @@ class ScheduleScreen extends StatefulWidget {
   final Future<void> Function(RegularScheduleImport)? saveRegular;
   final Future<Map<String, CourseDocumentClass>?> Function()?
   readCourseDocument;
+  final CourseDocumentSharing? documentSharing;
   final Future<CourseBackupData> Function(List<Course>)? saveDocumentCourses;
   final CourseBackupService? backup;
   final bool isDemo;
@@ -73,6 +76,13 @@ class _ScheduleScreenState extends State<ScheduleScreen>
   bool _startupCheckStarted = false;
   bool _offerUpdate = false;
   bool _updateScreenOpen = false;
+  bool _readingSharedCourseDocument = false;
+  bool _sharedCourseDocumentPending = false;
+  ({
+    MaterialPageRoute<List<Course>> route,
+    ValueNotifier<SharedCourseDocument?> inbox,
+  })?
+  _courseDocumentImport;
 
   bool get _canCheckForUpdate =>
       widget.checkForUpdate != null ||
@@ -109,8 +119,37 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     _today = (widget.now ?? DateTime.now)();
     _weekPages = PageController(initialPage: _week - 1, keepPage: false);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(_checkForUpdate());
+      if (!mounted) return;
+      widget.documentSharing?.listen(_onSharedCourseDocument);
+      _onSharedCourseDocument();
+      unawaited(_checkForUpdate());
     });
+  }
+
+  void _onSharedCourseDocument() {
+    if (widget.documentSharing == null ||
+        widget.readCourseDocument == null ||
+        widget.saveDocumentCourses == null)
+      return;
+    _sharedCourseDocumentPending = true;
+    if (!_readingSharedCourseDocument) unawaited(_readSharedCourseDocument());
+  }
+
+  Future<void> _readSharedCourseDocument() async {
+    final sharing = widget.documentSharing;
+    if (sharing == null) return;
+    _readingSharedCourseDocument = true;
+    try {
+      while (mounted && _sharedCourseDocumentPending) {
+        _sharedCourseDocumentPending = false;
+        final document = await sharing.takeSharedFile();
+        if (mounted && document != null) {
+          unawaited(_openCourseDocumentImport(context, shared: document));
+        }
+      }
+    } finally {
+      _readingSharedCourseDocument = false;
+    }
   }
 
   Future<void> _checkForUpdate() async {
@@ -196,6 +235,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.documentSharing?.listen(null);
     _weekPages.dispose();
     super.dispose();
   }
@@ -318,8 +358,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     final readFile = widget.readCourseDocument;
     final saveFromFile = widget.saveDocumentCourses;
     final saveSchool = widget.saveRegular;
-    CourseBackupData? savedDocument;
-    final imported = await Navigator.of(context).push<Object>(
+    final imported = await Navigator.of(context).push<RegularScheduleImport>(
       MaterialPageRoute(
         builder: (importContext) => RegularScheduleImportScreen(
           readSchool: supportsSchoolScheduleImport && saveSchool != null
@@ -328,43 +367,18 @@ class _ScheduleScreenState extends State<ScheduleScreen>
           saveCourses: saveSchool,
           openOtherImport: readFile != null && saveFromFile != null
               ? () async {
-                  final selected = await Navigator.of(importContext)
-                      .push<List<Course>>(
-                        MaterialPageRoute(
-                          builder: (context) => CourseDocumentImportScreen(
-                            readFile: readFile,
-                            termCalendar: _calendar,
-                            saveCourses: (courses) async {
-                              savedDocument = await saveFromFile(courses);
-                            },
-                          ),
-                        ),
-                      );
-                  if (importContext.mounted && selected != null) {
-                    Navigator.pop<Object>(importContext, selected);
+                  final saved = await _openCourseDocumentImport(importContext);
+                  if (saved &&
+                      importContext.mounted &&
+                      ModalRoute.of(importContext)?.isCurrent == true) {
+                    Navigator.pop(importContext);
                   }
                 }
               : null,
         ),
       ),
     );
-    if (!mounted) return;
-    final saved = savedDocument;
-    if (imported is List<Course> && imported.isNotEmpty && saved != null) {
-      setState(() {
-        _importedRegular = saved.regularCourses;
-        _importedLabs = saved.labCourses;
-        final week = imported.first.week;
-        _selectedWeek = week == _calendar.weekOf(_today) ? null : week;
-        _kind = null;
-      });
-      _syncWeekPage();
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('已导入 ${imported.length} 条文件课程')));
-      return;
-    }
-    if (imported is! RegularScheduleImport || imported.courses.isEmpty) return;
+    if (!mounted || imported == null || imported.courses.isEmpty) return;
     setState(() {
       _importedRegular = imported.courses;
       _calendar = imported.calendar ?? TermCalendar.cqutFall2026;
@@ -375,6 +389,65 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('已导入 ${imported.courses.length} 条正课安排')),
     );
+  }
+
+  Future<bool> _openCourseDocumentImport(
+    BuildContext sourceContext, {
+    SharedCourseDocument? shared,
+  }) async {
+    final read = widget.readCourseDocument;
+    final save = widget.saveDocumentCourses;
+    if (!mounted || !sourceContext.mounted || read == null || save == null) {
+      return false;
+    }
+    final active = _courseDocumentImport;
+    if (active != null && active.route.isActive) {
+      if (shared != null) active.inbox.value = shared;
+      return false;
+    }
+
+    final inbox = ValueNotifier<SharedCourseDocument?>(shared);
+    CourseBackupData? saved;
+    SharedCourseDocument? documentAtSave;
+    final route = MaterialPageRoute<List<Course>>(
+      builder: (_) => CourseDocumentImportScreen(
+        readFile: read,
+        termCalendar: _calendar,
+        openMessagingApp: widget.documentSharing?.openMessagingApp,
+        sharedDocument: inbox,
+        saveCourses: (courses) async {
+          documentAtSave = inbox.value;
+          saved = await save(courses);
+        },
+      ),
+    );
+    _courseDocumentImport = (route: route, inbox: inbox);
+    final result = Navigator.of(sourceContext).push(route);
+    unawaited(route.completed.then<void>((_) => inbox.dispose()));
+    final imported = await result;
+    final pending = inbox.value;
+    if (_courseDocumentImport?.route == route) _courseDocumentImport = null;
+    final data = saved;
+    if (!mounted || imported == null || imported.isEmpty || data == null) {
+      return false;
+    }
+    setState(() {
+      _importedRegular = data.regularCourses;
+      _importedLabs = data.labCourses;
+      final week = imported.first.week;
+      _selectedWeek = week == _calendar.weekOf(_today) ? null : week;
+      _kind = null;
+    });
+    _syncWeekPage();
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('已导入 ${imported.length} 条文件课程')));
+    if (pending != null && !identical(pending, documentAtSave)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted)
+          unawaited(_openCourseDocumentImport(context, shared: pending));
+      });
+    }
+    return true;
   }
 
   Future<void> _importLabs(

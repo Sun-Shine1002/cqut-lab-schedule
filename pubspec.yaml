@@ -1,7 +1,7 @@
 name: cqut_lab_schedule
 description: 重庆理工大学正课与实验课表
 publish_to: none
-version: 0.2.7+9
+version: 0.2.8+10
 
 environment:
   sdk: ^3.13.0

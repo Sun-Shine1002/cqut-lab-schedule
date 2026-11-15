@@ -1,13 +1,30 @@
 import 'package:cqut_lab_schedule/models/course.dart';
 import 'package:cqut_lab_schedule/models/term_calendar.dart';
+import 'package:cqut_lab_schedule/screens/course_document_import_screen.dart';
 import 'package:cqut_lab_schedule/screens/schedule_screen.dart';
 import 'package:cqut_lab_schedule/services/course_backup_service.dart';
+import 'package:cqut_lab_schedule/services/course_document_import.dart';
 import 'package:cqut_lab_schedule/services/course_document_parser.dart';
 import 'package:cqut_lab_schedule/services/demo_regular_courses.dart';
 import 'package:cqut_lab_schedule/services/schedule_parser.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+
+class _TestDocumentSharing extends CourseDocumentSharing {
+  SharedCourseDocument? pending;
+  VoidCallback? listener;
+
+  @override
+  void listen(VoidCallback? onFileAvailable) => listener = onFileAvailable;
+
+  @override
+  Future<SharedCourseDocument?> takeSharedFile() async {
+    final document = pending;
+    pending = null;
+    return document;
+  }
+}
 
 void main() {
   testWidgets('imports a file through the regular course entry', (
@@ -69,6 +86,70 @@ void main() {
     expect(saved, [lab]);
     expect(find.text('已有正课'), findsOneWidget);
     expect(find.text('文件里的数电实验'), findsOneWidget);
+  });
+
+  testWidgets('opens cold shared documents and updates the active preview', (
+    tester,
+  ) async {
+    const course = Course(
+      name: '数电实验',
+      week: 1,
+      weekday: DateTime.wednesday,
+      startTime: '10:30',
+      endTime: '12:10',
+      location: '实验楼 201',
+      teacher: '',
+    );
+    final sharing = _TestDocumentSharing()
+      ..pending = const SharedCourseDocument(
+        classes: {
+          '计算机一班': CourseDocumentClass(courses: [course]),
+        },
+      );
+    List<Course>? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ScheduleScreen(
+          courses: const [],
+          now: () => DateTime(2026, 9, 7),
+          documentSharing: sharing,
+          readCourseDocument: () async => null,
+          saveDocumentCourses: (courses) async {
+            saved = courses;
+            return CourseBackupData(
+              regularCourses: const [],
+              labCourses: courses,
+              termCalendar: null,
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final initialPreview = tester.element(
+      find.byType(CourseDocumentImportScreen),
+    );
+    expect(find.text('计算机一班'), findsOneWidget);
+    expect(saved, isNull);
+
+    sharing.pending = const SharedCourseDocument(
+      classes: {
+        '计算机二班': CourseDocumentClass(courses: [course]),
+      },
+    );
+    sharing.listener?.call();
+    await tester.pumpAndSettle();
+    expect(
+      tester.element(find.byType(CourseDocumentImportScreen)),
+      initialPreview,
+    );
+    expect(find.text('计算机二班'), findsOneWidget);
+    expect(find.text('计算机一班'), findsNothing);
+    await tester.tap(find.text('确认导入 1 条课程'));
+    await tester.pumpAndSettle();
+    expect(saved, [course]);
+    expect(find.byType(CourseDocumentImportScreen), findsNothing);
+    expect(find.text('数电实验'), findsOneWidget);
   });
 
   testWidgets('chooses both lab import methods and saves the direct preview', (

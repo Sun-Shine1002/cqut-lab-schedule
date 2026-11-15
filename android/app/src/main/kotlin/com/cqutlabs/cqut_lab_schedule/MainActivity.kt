@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.BitmapFactory
+import android.os.Bundle
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
@@ -16,15 +17,32 @@ import kotlin.math.abs
 
 class MainActivity : FlutterActivity() {
     private val courseBackupFiles = CourseBackupFileChannel(this)
+    private val courseDocuments = CourseDocumentChannel(this)
     private var schoolImportResult: MethodChannel.Result? = null
     private val weekdayPattern = Regex("^星\\s*期[一二三四五六日天]$")
     private val rangePattern = Regex("^\\d{1,2}:\\d{2}\\s*[-–—~至]\\s*\\d{1,2}:\\d{2}$")
     private val weekPattern = Regex("^\\d{1,2}$")
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) courseDocuments.receive(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        courseDocuments.receive(intent)
+    }
+
+    override fun onDestroy() {
+        courseDocuments.close()
+        super.onDestroy()
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
         courseBackupFiles.register(messenger)
+        courseDocuments.register(messenger)
         AppUpdateChannel.register(this, messenger)
         MethodChannel(
             messenger,

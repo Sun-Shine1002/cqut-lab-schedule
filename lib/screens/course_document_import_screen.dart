@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../models/course.dart';
 import '../models/term_calendar.dart';
+import '../services/course_document_import.dart';
 import '../services/course_document_parser.dart';
 import '../theme/schedule_theme.dart';
 
@@ -12,11 +14,15 @@ class CourseDocumentImportScreen extends StatefulWidget {
     required this.readFile,
     required this.saveCourses,
     this.termCalendar,
+    this.openMessagingApp,
+    this.sharedDocument,
   });
 
   final Future<Map<String, CourseDocumentClass>?> Function() readFile;
   final Future<void> Function(List<Course>) saveCourses;
   final TermCalendar? termCalendar;
+  final Future<void> Function(String source)? openMessagingApp;
+  final ValueListenable<SharedCourseDocument?>? sharedDocument;
 
   @override
   State<CourseDocumentImportScreen> createState() =>
@@ -28,11 +34,16 @@ class _CourseDocumentImportScreenState
   Map<String, CourseDocumentClass> _classes = const {};
   String? _selectedClass;
   final _selectedOptions = <(int, int)>{};
+  final _previewScroll = ScrollController();
+  SharedCourseDocument? _lastSharedDocument;
+  int _documentRevision = 0;
   bool _reading = false;
+  bool _openingMessagingApp = false;
   bool _saving = false;
+  List<Course>? _savedCourses;
   String? _error;
 
-  bool get _busy => _reading || _saving;
+  bool get _busy => _reading || _openingMessagingApp || _saving;
   TermCalendar get _calendar =>
       widget.termCalendar ?? TermCalendar.cqutFall2026;
 
@@ -52,39 +63,118 @@ class _CourseDocumentImportScreenState
     }
   }
 
+  @override
+  void initState() {
+    super.initState();
+    widget.sharedDocument?.addListener(_receiveSharedDocument);
+    _receiveSharedDocument();
+  }
+
+  @override
+  void didUpdateWidget(CourseDocumentImportScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.sharedDocument, widget.sharedDocument)) return;
+    oldWidget.sharedDocument?.removeListener(_receiveSharedDocument);
+    widget.sharedDocument?.addListener(_receiveSharedDocument);
+    _receiveSharedDocument();
+  }
+
+  @override
+  void dispose() {
+    widget.sharedDocument?.removeListener(_receiveSharedDocument);
+    _previewScroll.dispose();
+    super.dispose();
+  }
+
+  void _receiveSharedDocument() {
+    final document = widget.sharedDocument?.value;
+    if (_saving ||
+        document == null ||
+        identical(document, _lastSharedDocument)) {
+      return;
+    }
+    _lastSharedDocument = document;
+    // A file handed off from another app supersedes a pending local read.
+    _documentRevision++;
+    if (document.classes case final classes?) {
+      _showClasses(classes);
+    } else {
+      _showError(document.error ?? '未收到有效的课表文件，请重新打开附件。');
+    }
+  }
+
+  void _showClasses(Map<String, CourseDocumentClass> source) {
+    final classes = {
+      for (final entry in source.entries)
+        if (entry.value.courses.isNotEmpty ||
+            entry.value.alternatives.isNotEmpty)
+          entry.key: entry.value,
+    };
+    if (classes.isEmpty) {
+      _showError('文件中没有读到课程，请检查课表内容。');
+      return;
+    }
+    setState(() {
+      _error = null;
+      _classes = classes;
+      _selectClass(classes.length == 1 ? classes.keys.single : null);
+    });
+    _scrollToTop();
+  }
+
+  void _showError(String message) {
+    setState(() => _error = message);
+    _scrollToTop();
+  }
+
+  void _scrollToTop() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _previewScroll.hasClients) _previewScroll.jumpTo(0);
+    });
+  }
+
   Future<void> _readFile() async {
     if (_busy) return;
+    final revision = ++_documentRevision;
     setState(() {
       _reading = true;
       _error = null;
     });
     try {
       final source = await widget.readFile();
-      if (!mounted || source == null) return;
-      final classes = {
-        for (final entry in source.entries)
-          if (entry.value.courses.isNotEmpty ||
-              entry.value.alternatives.isNotEmpty)
-            entry.key: entry.value,
-      };
-      if (classes.isEmpty) {
-        throw const FormatException('文件中没有读到课程，请检查课表内容。');
+      if (mounted && revision == _documentRevision && source != null) {
+        _showClasses(source);
       }
-      setState(() {
-        _classes = classes;
-        _selectClass(classes.length == 1 ? classes.keys.single : null);
-      });
     } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _error = switch (error) {
-          FormatException(:final message) when message.isNotEmpty => message,
-          PlatformException(:final message?) when message.isNotEmpty => message,
-          _ => '无法读取这个课表文件，请检查格式后重试。',
-        };
+      if (!mounted || revision != _documentRevision) return;
+      _showError(switch (error) {
+        FormatException(:final message) when message.isNotEmpty => message,
+        PlatformException(:final message?) when message.isNotEmpty => message,
+        _ => '无法读取这个课表文件，请检查格式后重试。',
       });
     } finally {
       if (mounted) setState(() => _reading = false);
+    }
+  }
+
+  Future<void> _openMessagingApp(String source, String name) async {
+    final open = widget.openMessagingApp;
+    if (_busy || open == null) return;
+    final revision = _documentRevision;
+    setState(() {
+      _openingMessagingApp = true;
+      _error = null;
+    });
+    try {
+      await open(source);
+    } catch (error) {
+      if (!mounted || revision != _documentRevision) return;
+      _showError(switch (error) {
+        PlatformException(:final message?) when message.isNotEmpty => message,
+        _ => '无法打开$name，请在手机上打开应用后重试。',
+      });
+    } finally {
+      if (mounted) setState(() => _openingMessagingApp = false);
     }
   }
 
@@ -111,13 +201,13 @@ class _CourseDocumentImportScreenState
     });
     try {
       await widget.saveCourses(courses);
-      if (mounted) Navigator.pop(context, courses);
+      if (mounted) setState(() => _savedCourses = courses);
     } catch (_) {
       if (!mounted) return;
+      setState(() => _saving = false);
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('课表保存失败，请重试。')));
-    } finally {
-      if (mounted) setState(() => _saving = false);
+      _receiveSharedDocument();
     }
   }
 
@@ -134,6 +224,18 @@ class _CourseDocumentImportScreenState
 
   @override
   Widget build(BuildContext context) {
+    if (_savedCourses case final courses?
+        when ModalRoute.isCurrentOf(context) == true) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted ||
+            _savedCourses == null ||
+            ModalRoute.isCurrentOf(context) != true) {
+          return;
+        }
+        _savedCourses = null;
+        Navigator.pop(context, courses);
+      });
+    }
     final theme = Theme.of(context);
     final selectedCount = _selectedCourses.length;
     final pending = _pendingChoices;
@@ -146,6 +248,7 @@ class _CourseDocumentImportScreenState
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 640),
             child: ListView(
+              controller: _previewScroll,
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
               children: [
                 FilledButton.icon(
@@ -160,6 +263,32 @@ class _CourseDocumentImportScreenState
                     style: TextStyle(color: scheduleMuted),
                   ),
                 ),
+                if (widget.openMessagingApp != null) ...[
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      for (final (source, name, label) in const [
+                        ('wechat', '微信', '打开微信'),
+                        ('qq', 'QQ', '打开 QQ'),
+                      ])
+                        OutlinedButton(
+                          onPressed: _busy
+                              ? null
+                              : () => _openMessagingApp(source, name),
+                          child: Text(label),
+                        ),
+                    ],
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(4, 4, 4, 0),
+                    child: Text(
+                      '在聊天中打开 Excel 或 Word 附件，选择「用其他应用打开」或系统「分享」，再选「课程表」。',
+                      style: TextStyle(color: scheduleMuted),
+                    ),
+                  ),
+                ],
                 if (_classes.length > 1) ...[
                   const SizedBox(height: 16),
                   DropdownButtonFormField<String>(

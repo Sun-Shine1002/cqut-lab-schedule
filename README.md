@@ -6,6 +6,8 @@ Android 版支持从学校个人课表导入正课。实验课可以在连接校
 
 在「导入正课课表 → 其他导入」可选择 Excel（`.xlsx`）或 Word（`.docx`）课表文件。选择班级并核对课程后，即可将安排加入现有课表。同一实验有多个时段时，请勾选本人实际参加的时段。
 
+也可以在「其他导入」打开微信或 QQ。在聊天里打开课表附件，使用「用其他应用打开」或系统「分享」，再选择「课程表」进入选班预览。
+
 ## 下载与安装
 
 从 [GitHub Releases](https://github.com/Sun-Shine1002/cqut-lab-schedule/releases/latest) 下载 `cqut-schedule.apk`。

@@ -43,6 +43,9 @@ Future<void> main() async {
         saveRegular: (imported) =>
             regular.replace(imported.courses, calendar: imported.calendar),
         readCourseDocument: chooseCourseDocument,
+        documentSharing: CourseDocumentSharing.supported
+            ? const CourseDocumentSharing()
+            : null,
         saveDocumentCourses: ImportedCourseStore.addCoursesByKind,
         backup: const CourseBackupService(),
         isDemo: true,

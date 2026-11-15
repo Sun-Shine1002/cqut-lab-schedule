@@ -1,8 +1,67 @@
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import 'course_document_parser.dart';
 import 'course_document_tables.dart';
+
+class SharedCourseDocument {
+  const SharedCourseDocument({this.classes, this.error});
+
+  final Map<String, CourseDocumentClass>? classes;
+  final String? error;
+}
+
+class CourseDocumentSharing {
+  const CourseDocumentSharing();
+
+  static const _channel = MethodChannel(
+    'com.cqutlabs.cqut_lab_schedule/course_document',
+  );
+
+  static bool get supported =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  void listen(VoidCallback? onFileAvailable) {
+    _channel.setMethodCallHandler(
+      onFileAvailable == null
+          ? null
+          : (call) async {
+              if (call.method == 'sharedFileAvailable') onFileAvailable();
+            },
+    );
+  }
+
+  Future<void> openMessagingApp(String source) =>
+      _channel.invokeMethod<void>('openMessagingApp', source);
+
+  Future<SharedCourseDocument?> takeSharedFile() async {
+    try {
+      final document = await _channel.invokeMapMethod<String, Object?>(
+        'takeSharedFile',
+      );
+      if (document == null) return null;
+      if (document case {
+        'name': final String name,
+        'bytes': final Uint8List bytes,
+      }) {
+        final classes = await compute(_parseDocument, (bytes, name));
+        return SharedCourseDocument(classes: classes);
+      }
+      return const SharedCourseDocument(error: '未收到有效的课表文件，请重新打开附件。');
+    } on MissingPluginException {
+      return null;
+    } on Exception catch (error) {
+      return SharedCourseDocument(
+        error: switch (error) {
+          FormatException(:final message) when message.isNotEmpty => message,
+          PlatformException(:final message?) when message.isNotEmpty => message,
+          _ => '无法读取共享的课表文件，请重新打开附件。',
+        },
+      );
+    }
+  }
+}
 
 const _documentTypes = [
   XTypeGroup(
