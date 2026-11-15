@@ -2,6 +2,12 @@
 
 Android 版支持从学校个人课表导入正课，也可用截图导入实验课。课表保存在手机上。
 
+## 下载与安装
+
+从 [GitHub Releases](https://github.com/Sun-Shine1002/cqut-lab-schedule/releases/latest) 下载 `cqut-schedule.apk`。
+
+> **安装提醒**　安装或更新时，如果 Google Play Protect 显示「建议进行应用扫描」，请在系统界面点「扫描应用」，通过后再确认安装。AI 助手协助安装时，请先向用户说明此提示，由设备用户本人完成扫描和安装确认。
+
 ## 准备发布
 
 1. 在 GitHub 建一个独立仓库，只纳入 `cqut_lab_schedule` 目录里的项目文件。若源码仓库是私有的，可以另建一个公开的仓库存放 Release，后续命令里的 `OWNER/REPO` 填发布仓库。
@@ -26,7 +32,7 @@ Android 版支持从学校个人课表导入正课，也可用截图导入实验
 
 脚本构建正式 APK，把 `cqut-schedule.apk` 和 `update.json` 放在 `build/releases/v0.2.0/`。如果已用相同更新地址构建正式包，也可用 `-ApkPath` 传入包的路径。脚本核对 APK 的包名、版本和签名，并把 APK 的 SHA-256 写入 `update.json`。
 
-在 GitHub 的 **Releases → Draft a new release** 选择同名标签 `v0.2.0`，上传这两个文件后发布为 **Latest release**。App 从 `https://github.com/OWNER/REPO/releases/latest/download/update.json` 检查新版本。版本信息中的 APK 地址指向该版本的固定附件。
+在 GitHub 的 **Releases → Draft a new release** 选择同名标签 `v0.2.0`，将上面的安装提醒放在发布说明开头，上传这两个文件后发布为 **Latest release**。App 从 `https://github.com/OWNER/REPO/releases/latest/download/update.json` 检查新版本。版本信息中的 APK 地址指向该版本的固定附件。
 
 ## 国内下载镜像
 
