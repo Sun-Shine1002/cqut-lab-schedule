@@ -24,6 +24,8 @@ internal object AppUpdateChannel {
     private const val CHANNEL = "com.cqutlabs.cqut_lab_schedule/app_update"
     private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
     private const val INSTALL_PERMISSION_REQUIRED = "INSTALL_PERMISSION_REQUIRED"
+    private const val UPDATE_DIRECTORY = "app-updates"
+    private val updateFileName = Regex("""cqut-([1-9][0-9]*)\.apk(?:\.part)?""")
 
     fun register(activity: Activity, messenger: BinaryMessenger) {
         MethodChannel(
@@ -36,11 +38,14 @@ internal object AppUpdateChannel {
                 when (call.method) {
                     "getInfo" -> {
                         val installed = installedPackage(activity)
+                        val installedVersion = versionCode(installed)
+                        val cache = updateDirectory(activity)
+                        pruneInstalledUpdates(activity.cacheDir, cache, installedVersion)
                         result.success(
                             mapOf(
                                 "versionName" to installed.versionName.orEmpty(),
-                                "versionCode" to versionCode(installed),
-                                "cachePath" to updateDirectory(activity).path,
+                                "versionCode" to installedVersion,
+                                "cachePath" to cache.path,
                             ),
                         )
                     }
@@ -84,11 +89,28 @@ internal object AppUpdateChannel {
     }
 
     private fun updateDirectory(activity: Activity): File {
-        val cache = File(activity.cacheDir, "app-updates")
+        val cache = File(activity.cacheDir, UPDATE_DIRECTORY)
         if (!cache.isDirectory && !cache.mkdirs() && !cache.isDirectory) {
             throw IOException("Could not create the update cache")
         }
         return cache.canonicalFile
+    }
+
+    private fun pruneInstalledUpdates(cacheRoot: File, cache: File, installedVersion: Long) {
+        try {
+            if (cache != File(cacheRoot.canonicalFile, UPDATE_DIRECTORY)) return
+            for (file in cache.listFiles().orEmpty()) {
+                val match = updateFileName.matchEntire(file.name) ?: continue
+                val version = match.groupValues[1].toLongOrNull() ?: continue
+                if (version <= installedVersion && file.canonicalFile == file && file.isFile) {
+                    file.delete()
+                }
+            }
+        } catch (_: IOException) {
+            // An inaccessible cache should not block update checks.
+        } catch (_: SecurityException) {
+            // An inaccessible cache should not block update checks.
+        }
     }
 
     @Suppress("DEPRECATION") // Keep the integer flag overload on older Android versions.

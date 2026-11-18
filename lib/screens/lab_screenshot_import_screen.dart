@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -238,7 +240,21 @@ class _LabScreenshotImportScreenState extends State<LabScreenshotImportScreen> {
                               onTap: () => _openPreview(screenshot),
                               child: SizedBox(
                                 height: 176,
-                                child: _ScreenshotImage(bytes: screenshot),
+                                child: LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    final ratio = MediaQuery.devicePixelRatioOf(
+                                      context,
+                                    );
+                                    return _ScreenshotImage(
+                                      bytes: screenshot,
+                                      cacheWidth: (constraints.maxWidth * ratio)
+                                          .ceil(),
+                                      cacheHeight:
+                                          (constraints.maxHeight * ratio)
+                                              .ceil(),
+                                    );
+                                  },
+                                ),
                               ),
                             ),
                           ),
@@ -372,14 +388,58 @@ class _ImportPanel extends StatelessWidget {
   }
 }
 
-class _ScreenshotImage extends StatelessWidget {
-  const _ScreenshotImage({required this.bytes});
+class _ScreenshotImage extends StatefulWidget {
+  const _ScreenshotImage({
+    required this.bytes,
+    this.cacheWidth,
+    this.cacheHeight,
+  });
 
   final Uint8List bytes;
+  final int? cacheWidth;
+  final int? cacheHeight;
 
   @override
-  Widget build(BuildContext context) => Image.memory(
-    bytes,
+  State<_ScreenshotImage> createState() => _ScreenshotImageState();
+}
+
+class _ScreenshotImageState extends State<_ScreenshotImage> {
+  late ImageProvider _image = _imageProvider();
+
+  ImageProvider _imageProvider() {
+    final original = MemoryImage(widget.bytes);
+    final width = widget.cacheWidth;
+    final height = widget.cacheHeight;
+    if (width == null || height == null) return original;
+    return ResizeImage(
+      original,
+      width: width,
+      height: height,
+      policy: ResizeImagePolicy.fit,
+    );
+  }
+
+  @override
+  void didUpdateWidget(_ScreenshotImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.bytes == oldWidget.bytes &&
+        widget.cacheWidth == oldWidget.cacheWidth &&
+        widget.cacheHeight == oldWidget.cacheHeight) {
+      return;
+    }
+    unawaited(_image.evict());
+    _image = _imageProvider();
+  }
+
+  @override
+  void dispose() {
+    unawaited(_image.evict());
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Image(
+    image: _image,
     fit: BoxFit.contain,
     semanticLabel: '实验课表截图',
     errorBuilder: (context, error, stackTrace) =>
