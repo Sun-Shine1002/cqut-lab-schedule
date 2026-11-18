@@ -135,6 +135,7 @@ def sync(cnb, github, tag, apk, official):
     if len(payload) > 65536:
         raise ValueError("CNB metadata exceeds the app limit.")
 
+    print("Checking current CNB version before uploading.", flush=True)
     existing = cnb.read_manifest("latest", optional=True)
     if existing is not None:
         data = json.loads(existing)
@@ -144,6 +145,7 @@ def sync(cnb, github, tag, apk, official):
         if version == official["versionCode"] and data["sha256"] != official["sha256"]:
             raise ValueError("Do not reuse a build number for different APKs.")
 
+    print(f"Preparing CNB release {tag}.", flush=True)
     release = cnb.api(f"{cnb.root}/tags/{tag}", optional=True)
     if release is None:
         release = cnb.api(cnb.root, "POST", {
@@ -170,6 +172,7 @@ def sync(cnb, github, tag, apk, official):
                     if hashlib.file_digest(stream, "sha256").hexdigest() != asset["hash_value"].lower():
                         raise ValueError(f"Existing CNB attachment hash differs: {file.name}")
         elif release["draft"]:
+            print(f"Uploading {file.name} to CNB.", flush=True)
             cnb.upload(release_url, file)
         else:
             raise ValueError(f"Published CNB release is missing {file.name}.")
@@ -178,11 +181,13 @@ def sync(cnb, github, tag, apk, official):
         raise ValueError("GitHub latest changed while syncing. Rerun the workflow.")
     if release["draft"]:
         cnb.api(release_url, "PATCH", {"draft": False, "make_latest": "false"}, read_body=False)
+    print("Verifying the APK and manifest at the public CNB URLs.", flush=True)
     cnb.verify_apk(tag, apk.stat().st_size, mirror["sha256"])
     if cnb.read_manifest(tag) != payload:
         raise ValueError("CNB public metadata differs from the uploaded file.")
     if latest_tag(github) != tag:
         raise ValueError("GitHub latest changed while syncing. Rerun the workflow.")
+    print(f"Setting verified CNB release {tag} as latest.", flush=True)
     cnb.api(release_url, "PATCH", {"make_latest": "true"}, read_body=False)
     if cnb.read_manifest("latest") != payload:
         raise ValueError("CNB latest does not serve the verified update metadata.")
@@ -196,9 +201,12 @@ def main():
     if not REPOSITORY.fullmatch(repository) or repository.endswith(".git") or not token:
         raise ValueError("Configure a public CNB repository path and its release token.")
     cnb = CnbRelease(repository, token)
+    print("Checking the latest official GitHub release.", flush=True)
     tag = latest_tag(github)
     with TemporaryDirectory() as directory:
+        print(f"Downloading {tag} APK and manifest from GitHub.", flush=True)
         download_release(github, tag, directory)
+        print("Checking GitHub APK version, signature and SHA-256.", flush=True)
         root = Path(directory)
         apk = root / APK
         official = release_manifest(root / MANIFEST, github, tag)

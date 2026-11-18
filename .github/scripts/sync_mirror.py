@@ -21,7 +21,9 @@ MANIFEST_KEY = "updates/update.json"
 
 
 def gh(*args):
-    return subprocess.check_output(["gh", *args], text=True, encoding="utf-8")
+    return subprocess.check_output(
+        ["gh", *args], text=True, encoding="utf-8", timeout=45,
+    )
 
 
 def latest_tag(repository):
@@ -38,6 +40,7 @@ def download_release(repository, tag, directory):
             "--pattern", APK, "--pattern", MANIFEST, "--dir", directory,
         ],
         check=True,
+        timeout=360,
     )
 
 
